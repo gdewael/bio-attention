@@ -6,7 +6,7 @@ Stand-alone PyTorch implementation of 2D sliding window attention.
 
 ## Contents
 
-`2Dslidingwindow_attn.py` contains three PyTorch modules: `RelPositionalWindowEmbedding`, `MultiDimWindowAttention`, and `MultiDimWindowTransformerLayer`. The modules have been programmed in a way so that they can be used to do 1D sliding window attention, as well as >= 2-dimensional sliding window attention. In the multidimensional case, sliding window attention is applied over the first dimension following the batch dimension and full self-attention is applied over all the others.
+`sliding_window_attn.py` contains three PyTorch modules: `RelPositionalWindowEmbedding`, `MultiDimWindowAttention`, and `MultiDimWindowTransformerLayer`. The modules have been programmed in a way so that they can be used to do 1D sliding window attention, as well as >= 2-dimensional sliding window attention. In the multidimensional case, sliding window attention is applied over the first dimension following the batch dimension and full self-attention is applied over all the others.
 
 Sliding windows are efficiently obtained using the `unfold` operation.
 
