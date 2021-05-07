@@ -1,6 +1,6 @@
 # 2D Sliding Window Attention
 
-<img src="./2Dslidingwindow-attention.png" width="500">
+<img src="./2Dslidingwindow-attention.png" width="750">
 
 Stand-alone PyTorch implementation of 2D sliding window attention.
 
