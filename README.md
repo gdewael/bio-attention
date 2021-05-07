@@ -45,6 +45,7 @@ model = nn.Sequential([MultiDimWindowTransformerLayer(64, 8, 8, 256),
 # hidden = 64
 x = torch.randn(1, 512, 4, 64)
 pos = torch.cumsum(torch.randint(1, 7, (1, 512)), 1)
+# if all positional indices follow on eachother by one: pos = torch.arange(512).unsqueeze(0)
 
 x, pos = model((x, pos))
 ```
