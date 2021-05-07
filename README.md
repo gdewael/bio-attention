@@ -1,6 +1,6 @@
 # 2D Sliding Window Attention
 
-<img src="./2Dslidingwindow-attention.svg" width="500">
+<img src="./2Dslidingwindow-attention.png" width="500">
 
 Stand-alone PyTorch implementation of 2D sliding window attention.
 
@@ -76,6 +76,6 @@ x, pos = model((x, pos))
 ```
 
 Note that computational complexity will scale quadratically with each added dimension.
-For example: the attention matrix (per head) for the above 1D example is: $512 \times 21$.
-For the 2D example this becomes: $512 \cdot 4 \times 21 \cdot 4$.
-And for the 3D example: $512 \cdot 4 \cdot 3 \times 21 \cdot 4 \cdot 3$.
+For example: the attention matrix (per head) for the above 1D example is: `512 * 21`.
+For the 2D example this becomes: `(512*4) * (21*4)`.
+And for the 3D example: `(512*4*3) * (21*4*3)`.
