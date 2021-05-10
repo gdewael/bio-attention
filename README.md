@@ -20,14 +20,14 @@ from sliding_window_attn import MultiDimWindowTransformerLayer
 
 # one layer:
 layer = MultiDimWindowTransformerLayer(
-    hidden_dim=64, # number of input & output hidden dimensions (int)
-    head_dim=8, # hidden dimensionality of each SA head (int)
-    n_head=8, # number of SA heads (int)
-    ff_dim=256, # number of feed-forward hidden dimensions (int)
-    window=21, # window size of sliding window, should be odd. (int) (default=21)
-    dropout=0.20, # dropout rate on the self-attention matrix (float) (default=0.20)
+    hidden_dim=64,     # number of input & output hidden dimensions (int)
+    head_dim=8,        # hidden dimensionality of each SA head (int)
+    n_head=8,          # number of SA heads (int)
+    ff_dim=256,        # number of feed-forward hidden dimensions (int)
+    window=21,         # window size of sliding window, should be odd. (int) (default=21)
+    dropout=0.20,      # dropout rate on the self-attention matrix (float) (default=0.20)
     activation='relu', # activation used in feed-forward, either 'relu' or 'gelu' (str) (default='relu')
-    layernorm=True # whether to apply layernorm after attn+res and ff+res (bool) (default=True)
+    layernorm=True     # whether to apply layernorm after attn+res and ff+res (bool) (default=True)
 )
 
 # model consisting of 4 layers:
