@@ -166,8 +166,8 @@ class MultiDimWindowTransformerLayer(nn.Module):
             self.norm1 = nn.LayerNorm(hidden_dim)
             self.norm2 = nn.LayerNorm(hidden_dim)
         else:
-            self.norm1 = return_self()
-            self.norm2 = return_self()
+            self.norm1 = lambda x : x
+            self.norm2 = lambda x : x
         
         self.attn = MultiDimWindowAttention(hidden_dim, head_dim, n_head, hidden_dim,
                                     window=window, dropout=dropout)
