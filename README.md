@@ -6,7 +6,7 @@ Stand-alone PyTorch implementation of 2D sliding window attention.
 
 ## Contents
 
-`2Dslidingwindow_attn.py` contains three PyTorch modules: `RelPositionalWindowEmbedding`, `MultiDimWindowAttention`, and `MultiDimWindowTransformerLayer`. The modules have been programmed in a way so that they can be used to do 1D sliding window attention, as well as >= 2-dimensional sliding window attention. In the multidimensional case, sliding window attention is applied over the first dimension following the batch dimension and full self-attention is applied over all the others.
+`sliding_window_attn.py` contains three PyTorch modules: `RelPositionalWindowEmbedding`, `MultiDimWindowAttention`, and `MultiDimWindowTransformerLayer`. The modules have been programmed in a way so that they can be used to do 1D sliding window attention, as well as >= 2-dimensional sliding window attention. In the multidimensional case, sliding window attention is applied over the first dimension following the batch dimension and full self-attention is applied over all the others.
 
 Sliding windows are efficiently obtained using the `unfold` operation.
 
@@ -20,14 +20,14 @@ from sliding_window_attn import MultiDimWindowTransformerLayer
 
 # one layer:
 layer = MultiDimWindowTransformerLayer(
-    hidden_dim=64, # number of input & output hidden dimensions (int)
-    head_dim=8, # hidden dimensionality of each SA head (int)
-    n_head=8, # number of SA heads (int)
-    ff_dim=256, # number of feed-forward hidden dimensions (int)
-    window=21, # window size of sliding window, should be odd. (int) (default=21)
-    dropout=0.20, # dropout rate on the self-attention matrix (float) (default=0.20)
+    hidden_dim=64,     # number of input & output hidden dimensions (int)
+    head_dim=8,        # hidden dimensionality of each SA head (int)
+    n_head=8,          # number of SA heads (int)
+    ff_dim=256,        # number of feed-forward hidden dimensions (int)
+    window=21,         # window size of sliding window, should be odd. (int) (default=21)
+    dropout=0.20,      # dropout rate on the self-attention matrix (float) (default=0.20)
     activation='relu', # activation used in feed-forward, either 'relu' or 'gelu' (str) (default='relu')
-    layernorm=True # whether to apply layernorm after attn+res and ff+res (bool) (default=True)
+    layernorm=True     # whether to apply layernorm after attn+res and ff+res (bool) (default=True)
 )
 
 # model consisting of 4 layers:
@@ -45,6 +45,7 @@ model = nn.Sequential([MultiDimWindowTransformerLayer(64, 8, 8, 256),
 # hidden = 64
 x = torch.randn(1, 512, 4, 64)
 pos = torch.cumsum(torch.randint(1, 7, (1, 512)), 1)
+# if all positional indices follow on eachother by one: pos = torch.arange(512).unsqueeze(0)
 
 x, pos = model((x, pos))
 ```
