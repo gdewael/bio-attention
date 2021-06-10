@@ -80,3 +80,16 @@ Note that computational complexity will scale quadratically with each added dime
 For example: the attention matrix (per head) for the above 1D example is: `512 * 21`.
 For the 2D example this becomes: `(512*4) * (21*4)`.
 And for the 3D example: `(512*4*3) * (21*4*3)`.
+
+## Citation
+
+If you find this repository useful in your research, please cite our [paper](https://www.biorxiv.org/content/10.1101/2021.06.08.447547v1).
+```bibtex
+@article{dewaele2021cpg,
+	author = {Gaetan De Waele, and Jim Clauwaert and Gerben Menschaert and Willem Waegeman},
+	title = {CpG Transformer for imputation of single-cell methylomes},
+	year = {2021},
+	doi = {10.1101/2021.06.08.447547},
+	URL = {https://www.biorxiv.org/content/early/2021/06/09/2021.06.08.447547}
+}
+```
