@@ -2,7 +2,7 @@
 
 <img src="./2Dslidingwindow-attention.png" width="750">
 
-Stand-alone PyTorch implementation of 2D sliding window attention. Introduced by and part of CpG Transformer located [here](https://github.com/gdewael/cpg-transformer). (**paper coming soon**)
+Stand-alone PyTorch implementation of 2D sliding window attention. Introduced by and part of CpG Transformer located at this [repo](https://github.com/gdewael/cpg-transformer) and detailed in our [preprint paper](https://www.biorxiv.org/content/10.1101/2021.06.08.447547v1).
 
 ## Contents
 
