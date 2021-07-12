@@ -10,7 +10,7 @@ Stand-alone PyTorch implementation of 2D sliding window attention. Introduced by
 
 Sliding windows are efficiently obtained using the `unfold` operation.
 
-Note that positional encodings are applied for the dimension in which sliding windows are applied. To inform the model of position in other dimensions, this should be encoded in the input itself.
+Positional embeddings are relative sinusoidal ones as described in [Transformer-XL](https://arxiv.org/abs/1901.02860). Note that positional encodings are applied for the dimension in which sliding windows are applied. To inform the model of position in other dimensions, this should be encoded in the input itself.
 
 ## Usage
 
