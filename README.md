@@ -3,7 +3,6 @@
 
 Simple implementations of attention modules adapted for the biological data domain.
 
-
 [![PyPi Version](https://img.shields.io/pypi/v/bio-attention.svg)](https://pypi.python.org/pypi/bio-attention/)
 [![GitHub license](https://img.shields.io/github/license/gdewael/bio-attention)](https://github.com/gdewael/bio-attention/blob/main/LICENSE)
 
@@ -12,9 +11,9 @@ Simple implementations of attention modules adapted for the biological data doma
 
 
 ## Install
-Since PyTorch is a dependency of `h5torch`, we recommend [installing PyTorch](https://pytorch.org/get-started/locally/) independently first, as your system may require a specific version (e.g. CUDA drivers).
+Since PyTorch is a dependency of `bio-attention`, we recommend [installing PyTorch](https://pytorch.org/get-started/locally/) independently first, as your system may require a specific version (e.g. CUDA drivers).
 
-After PyTorch installation, `h5torch` can be installed using `pip`
+After PyTorch installation, `bio-attention` can be installed using `pip`
 ```bash
 pip install bio-attention
 ```
@@ -22,7 +21,20 @@ pip install bio-attention
 ## Usage
 
 ## Package roadmap
-- [x] Implement typing
+
+- [ ] Positional encoding schemes
+  - [ ] Sinusoidal
+  - [ ] Learned
+  - [ ] T5 ?
+  - [ ] T-XL
+  - [ ] ALiBi
+  - [ ] Rotary
+- [ ] GLU FF (options for diff. activations)
+- [ ] RMS Norm
+- [ ] Axial attention
+- [ ] Cross-attention
+- [ ] Causal attention
+- [ ] Performer
 
 
 # LEGACY documentation
