@@ -1,10 +1,40 @@
-# 2D Sliding Window Attention
+<div align="center">
+<h1>bio-attention</h1>
 
-<img src="./2Dslidingwindow-attention.png" width="750">
+Simple implementations of attention modules adapted for the biological data domain.
+
+
+[![PyPi Version](https://img.shields.io/pypi/v/bio-attention.svg)](https://pypi.python.org/pypi/bio-attention/)
+[![GitHub license](https://img.shields.io/github/license/gdewael/bio-attention)](https://github.com/gdewael/bio-attention/blob/main/LICENSE)
+
+</div>
+
+
+
+## Install
+Since PyTorch is a dependency of `h5torch`, we recommend [installing PyTorch](https://pytorch.org/get-started/locally/) independently first, as your system may require a specific version (e.g. CUDA drivers).
+
+After PyTorch installation, `h5torch` can be installed using `pip`
+```bash
+pip install bio-attention
+```
+
+## Usage
+
+## Package roadmap
+- [x] Implement typing
+
+
+# LEGACY documentation
+## THIS REPO USED TO BE A 2D SLIDING WINDOW ATTENTION REPO
+
+### 2D Sliding Window Attention
+
+<img src="./bio-attention/img/2Dslidingwindow-attention.png" width="750">
 
 Stand-alone PyTorch implementation of 2D sliding window attention. Introduced by and part of CpG Transformer located at this [repo](https://github.com/gdewael/cpg-transformer) and detailed in our [preprint paper](https://www.biorxiv.org/content/10.1101/2021.06.08.447547v1).
 
-## Contents
+### Contents
 
 `sliding_window_attn.py` contains three PyTorch modules: `RelPositionalWindowEmbedding`, `MultiDimWindowAttention`, and `MultiDimWindowTransformerLayer`. The modules have been programmed in a way so that they can be used to do 1D sliding window attention, as well as >= 2-dimensional sliding window attention. In the multidimensional case, sliding window attention is applied over the first dimension following the batch dimension and full self-attention is applied over all the others.
 
@@ -12,7 +42,7 @@ Sliding windows are efficiently obtained using the `unfold` operation.
 
 Positional embeddings are relative sinusoidal ones as described in [Transformer-XL](https://arxiv.org/abs/1901.02860). Note that positional encodings are applied for the dimension in which sliding windows are applied. To inform the model of position in other dimensions, this should be encoded in the input itself.
 
-## Usage
+### Usage
 
 ```python
 
