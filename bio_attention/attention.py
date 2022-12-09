@@ -68,12 +68,12 @@ class WindowAttention(nn.Module):
         
         q = q * (h ** -.5)
         
-        pad_q = compl_mod(s, self.q_ch)
-        pad_k = compl_mod((s + self.w*2)-self.k_ch, self.q_ch)
+        q_pad = compl_mod(s, self.q_ch)
+        k_pad = compl_mod((s + self.w*2)-self.k_ch, self.q_ch)
         
-        q = F.pad(k, (0,)*5 + (pad_q,)).unfold(1, self.q_ch, self.q_ch)
-        k = F.pad(k, (0,)*4 + (self.w, self.w + pad_k)).unfold(1, self.k_ch, self.q_ch)
-        v = F.pad(v, (0,)*4 + (self.w, self.w + pad_k)).unfold(1, self.k_ch, self.q_ch)
+        q = F.pad(k, (0,)*5 + (q_pad,)).unfold(1, self.q_ch, self.q_ch)
+        k = F.pad(k, (0,)*4 + (self.w, self.w + k_pad)).unfold(1, self.k_ch, self.q_ch)
+        v = F.pad(v, (0,)*4 + (self.w, self.w + k_pad)).unfold(1, self.k_ch, self.q_ch)
         
         A = einsum('b c n h q, b c n h k -> b n c q k ', q, k)
         
