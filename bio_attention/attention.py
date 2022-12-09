@@ -1,6 +1,10 @@
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
+import math
+
+def compl_mod(m, n):
+    return int(n * math.ceil(m/n) - m)
 
 class VanillaSelfAttention(nn.Module):
     def __init__(self):
@@ -43,12 +47,20 @@ class RandomSelfAttention(nn.Module):
         return z
     
 class WindowAttention(nn.Module):
-    def __init__(self, window):
+    def __init__(self, window, dropout=0.1):
         super().__init__()
         assert window % 2 == 1, 'Window size should be an odd integer.'
         
-        self.softmax = nn.Softmax(dim = -2)
+        self.softmax = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
         self.w = int((window-1)/2)
+        
+        self.k_ch = window * 2
+        self.q_ch = window + 1
+        
+        u = torch.triu(torch.full((self.q_ch, self.k_ch), True))
+        l = torch.tril(torch.full((self.q_ch, self.k_ch), True), self.w*2)
+        self.mask = torch.logical_and(u, l).cuda()
     
     def forward(self, q, k, v):
         assert k.shape[1] == q.shape[1], 'q and k should have same input length.'
@@ -56,19 +68,21 @@ class WindowAttention(nn.Module):
         
         q = q * (h ** -.5)
         
-        k = F.pad(k, (0,)*4 + (self.w,)*2).unfold(1, s, 1)
-        v = F.pad(v, (0,)*4 + (self.w,)*2).unfold(1, s, 1)
+        q_pad = compl_mod(s, self.q_ch)
+        k_pad = compl_mod((s + self.w*2)-self.k_ch, self.q_ch)
         
-        A = einsum('b q n h, b k n h q -> b q k n', q, k)
+        q = F.pad(k, (0,)*5 + (q_pad,)).unfold(1, self.q_ch, self.q_ch)
+        k = F.pad(k, (0,)*4 + (self.w, self.w + k_pad)).unfold(1, self.k_ch, self.q_ch)
+        v = F.pad(v, (0,)*4 + (self.w, self.w + k_pad)).unfold(1, self.k_ch, self.q_ch)
         
-        mask = torch.zeros((nh, s), device = k.device).bool()
-        mask = F.pad(mask, (self.w,)*2, value = True).unfold(1, s, 1)
-        mask = mask.transpose(0,-1).unsqueeze(0)
+        A = einsum('b c n h q, b c n h k -> b n c q k ', q, k)
         
         mask_value = -torch.finfo(A.dtype).max
-        A.masked_fill_(mask, mask_value)
-        
+        A[:,:].masked_fill_(~self.mask, mask_value)
         A = self.softmax(A)
+        A = self.dropout(A)
 
-        z = einsum('b q k n, b k n h q -> b q n h', A, v)
+        z = einsum('b n c q k, b c n h k -> b n c q h', A, v)
+        z = z.view(b,nh, -1, h)[:,:,:s].permute(0,2,1,3)
+        
         return z
