@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 
 def compl_mod(m, n):
-    return int(n * math(m/n) - m)   
+    return int(n * math(m/n) - m)
 
 class VanillaSelfAttention(nn.Module):
     def __init__(self):
@@ -47,11 +47,12 @@ class RandomSelfAttention(nn.Module):
         return z
     
 class WindowAttention(nn.Module):
-    def __init__(self, window):
+    def __init__(self, window, dropout=0.1):
         super().__init__()
         assert window % 2 == 1, 'Window size should be an odd integer.'
         
         self.softmax = nn.Softmax(dim = -1)
+        self.dropout = nn.Dropout(dropout)
         self.w = int((window-1)/2)
         
         self.k_ch = window*2
@@ -79,6 +80,7 @@ class WindowAttention(nn.Module):
         mask_value = -torch.finfo(A.dtype).max
         A[:,:].masked_fill_(~self.mask, mask_value)
         A = self.softmax(A)
+        A = self.dropout(A)
 
         z = einsum('b n c q k, b c n h k -> b n c q h', A, v)
         z = z.view(b,nh, -1, h)[:,:,:-pad_q].permute(0,2,1,3)
