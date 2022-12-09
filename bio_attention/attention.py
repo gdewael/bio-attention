@@ -55,8 +55,8 @@ class WindowAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.w = int((window-1)/2)
         
-        self.k_ch = window*2
-        self.q_ch = self.k_ch - window + 1
+        self.k_ch = window * 2
+        self.q_ch = window + 1
         
         u = torch.triu(torch.full((self.q_ch, self.k_ch), True))
         l = torch.tril(torch.full((self.q_ch, self.k_ch), True), self.w*2)
@@ -69,7 +69,7 @@ class WindowAttention(nn.Module):
         q = q * (h ** -.5)
         
         pad_q = compl_mod(s, self.q_ch)
-        pad_k = compl_mod((s + self.w*2), self.q_ch)
+        pad_k = compl_mod((s + self.w*2)-self.k_ch, self.q_ch)
         
         q = F.pad(k, (0,)*5 + (pad_q,)).unfold(1, self.q_ch, self.q_ch)
         k = F.pad(k, (0,)*4 + (self.w, self.w + pad_k)).unfold(1, self.k_ch, self.q_ch)
