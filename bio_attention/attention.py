@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 
 def compl_mod(m, n):
-    return int(n * math(m/n) - m)
+    return int(n * math.ceil(m/n) - m)
 
 class VanillaSelfAttention(nn.Module):
     def __init__(self):
