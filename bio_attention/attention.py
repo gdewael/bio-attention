@@ -83,6 +83,6 @@ class WindowAttention(nn.Module):
         A = self.dropout(A)
 
         z = einsum('b n c q k, b c n h k -> b n c q h', A, v)
-        z = z.view(b,nh, -1, h)[:,:,:-pad_q].permute(0,2,1,3)
+        z = z.view(b,nh, -1, h)[:,:,:s].permute(0,2,1,3)
         
         return z
