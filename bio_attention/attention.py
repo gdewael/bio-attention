@@ -60,7 +60,7 @@ class WindowAttention(nn.Module):
         
         u = torch.triu(torch.full((self.q_ch, self.k_ch), True))
         l = torch.tril(torch.full((self.q_ch, self.k_ch), True), self.w*2)
-        self.mask = torch.logical_and(u, l).cuda()
+        self.mask = torch.logical_and(u, l)
     
     def forward(self, q, k, v):
         assert k.shape[1] == q.shape[1], 'q and k should have same input length.'
@@ -78,7 +78,7 @@ class WindowAttention(nn.Module):
         A = einsum('b c n h q, b c n h k -> b n c q k ', q, k)
         
         mask_value = -torch.finfo(A.dtype).max
-        A[:,:].masked_fill_(~self.mask, mask_value)
+        A[:,:].masked_fill_(~self.mask.to(A.device), mask_value)
         A = self.softmax(A)
         A = self.dropout(A)
 
