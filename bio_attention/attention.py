@@ -81,11 +81,15 @@ class WindowAttention(nn.Module):
         mask_value = -torch.finfo(A.dtype).max
         mask_k_right = torch.clone(self.mask.to(A.device))
         mask_k_right[:,-(self.w+k_pad):] = True
-        mask = torch.stack([self.mask_k_left.to(A.device)] + \
-                           [self.mask.to(A.device)]*(q.shape[1]-2) + \
-                           [mask_k_right])
+        if q.shape[1] > 1:
+            mask = torch.stack([self.mask_k_left.to(A.device)] + \
+                               [self.mask.to(A.device)]*(q.shape[1]-2) + \
+                               [mask_k_right])
+        else:
+            mask = torch.logical_or(self.mask_k_left.to(A.device),
+                                    mask_k_right).unsqueeze(0)
         
-        A[:,:].masked_fill_(mask.to(A.device), mask_value)
+        A[:].masked_fill_(mask, mask_value)
         A = self.softmax(A)
         A = self.dropout(A)
         
