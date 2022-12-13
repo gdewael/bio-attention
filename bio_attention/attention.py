@@ -59,8 +59,9 @@ class WindowAttention(nn.Module):
         self.q_ch = window + 1
         
         u = torch.triu(torch.full((self.q_ch, self.k_ch), True))
-        l = torch.tril(torch.full((self.q_ch, self.k_ch), True), self.w*2)
-        self.mask = torch.logical_and(u, l)
+        self.mask = ~torch.logical_and(u, torch.flip(u,[0,1]))
+        self.mask_k_left = torch.clone(self.mask)
+        self.mask_k_left[:,:self.w] = True
     
     def forward(self, q, k, v):
         assert k.shape[1] == q.shape[1], 'q and k should have same input length.'
@@ -71,17 +72,23 @@ class WindowAttention(nn.Module):
         q_pad = compl_mod(s, self.q_ch)
         k_pad = compl_mod((s + self.w*2)-self.k_ch, self.q_ch)
         
-        q = F.pad(k, (0,)*5 + (q_pad,)).unfold(1, self.q_ch, self.q_ch)
+        q = F.pad(q, (0,)*5 + (q_pad,)).unfold(1, self.q_ch, self.q_ch)
         k = F.pad(k, (0,)*4 + (self.w, self.w + k_pad)).unfold(1, self.k_ch, self.q_ch)
         v = F.pad(v, (0,)*4 + (self.w, self.w + k_pad)).unfold(1, self.k_ch, self.q_ch)
         
         A = einsum('b c n h q, b c n h k -> b n c q k ', q, k)
         
         mask_value = -torch.finfo(A.dtype).max
-        A[:,:].masked_fill_(~self.mask.to(A.device), mask_value)
+        mask_k_right = torch.clone(self.mask.to(A.device))
+        mask_k_right[:,-(self.w+k_pad):] = True
+        mask = torch.stack([self.mask_k_left.to(A.device)] + \
+                           [self.mask.to(A.device)]*(q.shape[1]-2) + \
+                           [mask_k_right])
+        
+        A[:,:].masked_fill_(mask.to(A.device), mask_value)
         A = self.softmax(A)
         A = self.dropout(A)
-
+        
         z = einsum('b n c q k, b c n h k -> b n c q h', A, v)
         z = z.view(b,nh, -1, h)[:,:,:s].permute(0,2,1,3)
         
