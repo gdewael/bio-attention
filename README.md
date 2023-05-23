@@ -10,6 +10,10 @@ Simple implementations of attention modules adapted for the biological data doma
 
 
 
+# :construction: THIS CODE IS BEING ACTIVELY DEVELOPED :construction:
+
+Don't look for stability here (yet).
+
 ## Install
 Since PyTorch is a dependency of `bio-attention`, we recommend [installing PyTorch](https://pytorch.org/get-started/locally/) independently first, as your system may require a specific version (e.g. CUDA drivers).
 
@@ -22,19 +26,34 @@ pip install bio-attention
 
 ## Package roadmap
 
-- [ ] Positional encoding schemes
-  - [ ] Sinusoidal
-  - [ ] Learned
-  - [ ] T5 ?
-  - [ ] T-XL
-  - [ ] ALiBi
-  - [ ] Rotary
-- [ ] GLU FF (options for diff. activations)
-- [ ] RMS Norm
-- [ ] Axial attention
-- [ ] Cross-attention
-- [ ] Causal attention
-- [ ] Performer
+- [x] Embedding layers
+  - [x] Continuous
+  - [x] Discrete
+  - [x] Binary
+  - [x] Bin
+- [~] Positional encoding schemes
+  - [x] Sinusoidal
+  - [x] Embedding
+  - [x] Continuous
+  - [x] Rotary
+  - [x] AliBi
+  - [x] DPB
+  - [x] XL
+  - [ ] Test support for multi-dimensional inputs
+- [~] Attention modules
+  - [x] Vanilla
+  - [x] Windowed
+  - [x] Random
+  - [x] Performer
+  - [x] Axial
+  - [x] Flatten
+  - [x] Encoder
+  - [x] Decoder
+  - [ ] Cross
+- [ ] Tests
+- [ ] Typing
+- [ ] Docs
+- [ ] 
 
 
 # LEGACY documentation
