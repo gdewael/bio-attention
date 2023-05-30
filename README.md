@@ -39,17 +39,16 @@ pip install bio-attention
   - [x] AliBi
   - [x] DPB
   - [x] XL
-  - [ ] Test support for multi-dimensional inputs
+  - [x] Test support for multi-dimensional inputs
 - [~] Attention modules
   - [x] Vanilla
   - [x] Windowed
   - [x] Random
   - [x] Performer
-  - [x] Axial
-  - [x] Flatten
   - [x] Encoder
   - [x] Decoder
   - [ ] Cross
+  - [x] Support for multi-dim inputs
 - [ ] Tests
 - [ ] Typing
 - [ ] Docs
