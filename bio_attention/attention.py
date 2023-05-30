@@ -33,15 +33,17 @@ class Attention(torch.nn.Module):
     def forward(self, q, k, v, mask=None, causal=False):
         """Default attention layer
 
+        NOTE: causal attention will erase input masks
+
         Parameters
         ----------
-        q : B, L1, NH, H
+        q : B, *, L1, NH, H
             queries
-        k : B, L2, NH, H
+        k : B, *, L2, NH, H
             keys
-        v : B, L2, NH, H
+        v : B, *, L2, NH, H
             values
-        mask : B, NH, L1, L2, optional
+        mask : B, *, NH, L1, L2, optional
             _description_, by default None
         causal : bool, optional
             whether to do causal attention or not, by default False
@@ -51,25 +53,25 @@ class Attention(torch.nn.Module):
         _type_
             _description_
         """
+        q_shape = q.shape
+        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3), (q, k, v))
+        if mask is not None:
+            mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
         if self.use_context_manager:
             with torch.backends.cuda.sdp_kernel(**self.context_manager):
                 return F.scaled_dot_product_attention(
-                    q.permute(0, 2, 1, 3),
-                    k.permute(0, 2, 1, 3),
-                    v.permute(0, 2, 1, 3),
+                    q,k,v,
                     dropout_p=(self.dropout if self.training else 0),
                     attn_mask=mask,
                     is_causal=causal,
-                ).permute(0, 2, 1, 3)
+                ).permute(0, 2, 1, 3).view(*q_shape)
         else:
             return F.scaled_dot_product_attention(
-                q.permute(0, 2, 1, 3),
-                k.permute(0, 2, 1, 3),
-                v.permute(0, 2, 1, 3),
+                q,k,v,
                 dropout_p=(self.dropout if self.training else 0),
                 attn_mask=mask,
                 is_causal=causal,
-            ).permute(0, 2, 1, 3)
+            ).permute(0, 2, 1, 3).view(*q_shape)
 
 
 class RandomAttention(nn.Module):
@@ -88,15 +90,17 @@ class RandomAttention(nn.Module):
     def forward_indexed(self, q, k, v, mask = None, causal = False):
         """random attention layer
 
+        NOTE: causal attention will erase input masks
+
         Parameters
         ----------
-        q : B, L1, NH, H
+        q : B, *, L1, NH, H
             queries
-        k : B, L2, NH, H
+        k : B, *, L2, NH, H
             keys
-        v : B, L2, NH, H
+        v : B, *, L2, NH, H
             values
-        mask : B, NH, L1, L2, optional
+        mask : B, *, NH, L1, L2, optional
             _description_, by default None
         causal : bool, optional
             whether to do causal attention or not, by default False
@@ -107,12 +111,19 @@ class RandomAttention(nn.Module):
             _description_
         """
         assert not (causal and (mask is not None))
+
+        q_shape = q.shape
+        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h"), (q, k, v))
+        if mask is not None:
+            mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
+        
         b, s2, nh, h = k.shape
         s1 = q.shape[1]
-        
+
         mask = torch.ones(b, nh, s1, s2, dtype=torch.bool).tril(diagonal=0) if causal else mask
         if mask is not None:
             mask = (~mask).float().masked_fill(~mask, -float('inf')) if mask.dtype==torch.bool else mask
+            mask = mask.to(q)
 
         q = q * (h**-0.5)
 
@@ -135,26 +146,48 @@ class RandomAttention(nn.Module):
         A = self.dropout(A)
         z = einsum("b q k n, b q k n h -> b q n h", A, v)
 
-        return z
+        return z.view(*q_shape)
 
     def forward_naive(self, q, k, v, mask = None, causal = False):
-        b, s2, nh, h = k.shape
-        s1 = q.shape[1]
+        """NOTE: Is incompatible with causal attention.
+        NOTE: Is incompatible with input masks attention.
+
+        Args:
+            q (_type_): _description_
+            k (_type_): _description_
+            v (_type_): _description_
+            mask (_type_, optional): _description_. Defaults to None.
+            causal (bool, optional): _description_. Defaults to False.
+
+        Returns:
+            _type_: _description_
+        """
+        q_shape = q.shape
+        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3), (q, k, v))
+        if mask is not None:
+            mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
+
+        b, nh, s2, h = k.shape
+        s1 = q.shape[-2]
+
         mask = (torch.rand(b, 1, s1, s2) < (self.n/s2)).expand(-1, nh, -1, -1).to(k.device)
+
         return F.scaled_dot_product_attention(
-                q.permute(0, 2, 1, 3),
-                k.permute(0, 2, 1, 3),
-                v.permute(0, 2, 1, 3),
+                q,
+                k,
+                v,
                 dropout_p=(self.dropout if self.training else 0),
                 attn_mask=mask,
                 is_causal=causal,
-            ).permute(0, 2, 1, 3)
+            ).permute(0, 2, 1, 3).view(*q_shape)
 
 
 class WindowAttention(nn.Module):
     def __init__(self, window = 5, dropout=0.1, materialize_full = False, **kwargs,):
         super().__init__()
         assert window % 2 == 1, "Window size should be an odd integer."
+
+        self.w = int((window - 1) / 2)
 
         if not materialize_full:
             self.softmax = nn.Softmax(dim=-1)
@@ -171,9 +204,6 @@ class WindowAttention(nn.Module):
         else:
             self.dropout = dropout
             self.forward = self.forward_naive
-
-        self.w = int((window - 1) / 2)
-        
 
     def forward_sliced(self, q, k, v, mask= None, causal = False):
         """windowed attention layer
@@ -198,7 +228,11 @@ class WindowAttention(nn.Module):
         """
         assert mask is None
 
-        assert k.shape[1] == q.shape[1], "q and k should have same input length."
+        assert k.shape[-3] == q.shape[-3], "q and k should have same input length."
+
+        q_shape = q.shape
+        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h"), (q, k, v))
+
         b, s, nh, h = k.shape
 
         q = q * (h**-0.5)
@@ -237,98 +271,30 @@ class WindowAttention(nn.Module):
         A = self.dropout(A)
 
         z = einsum("b n c q k, b c n h k -> b n c q h", A, v)
-        z = z.view(b, nh, -1, h)[:, :, :s].permute(0, 2, 1, 3)
+        z = z.view(b, nh, -1, h)[:, :, :s].permute(0, 2, 1, 3).view(*q_shape)
 
         return z
+
     def forward_naive(self, q, k, v, mask=None, causal = False):
         assert mask is None
-        assert k.shape[1] == q.shape[1], "q and k should have same input length."
-        b, s2, nh, h = k.shape
-        s1 = q.shape[1]
+        assert k.shape[-3] == q.shape[-3], "q and k should have same input length."
+
+        q_shape = q.shape
+        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3), (q, k, v))
+
+        b, nh, s2, h = k.shape
+        s1 = q.shape[-2]
+
         u = torch.triu(torch.full((s1, s2), True), diagonal = -self.w)
         mask = torch.logical_and(u, torch.flip(u, [0, 1])).expand(b, nh, -1, -1).to(k.device)
         if causal:
             mask = torch.tril(mask)
         return F.scaled_dot_product_attention(
-                q.permute(0, 2, 1, 3),
-                k.permute(0, 2, 1, 3),
-                v.permute(0, 2, 1, 3),
+                q,k,v,
                 dropout_p=(self.dropout if self.training else 0),
                 attn_mask=mask,
                 is_causal=False,
-            ).permute(0, 2, 1, 3)
-
-
-class AxializeAttention(nn.Module):
-    def __init__(self, attn_module, seq_axis = 1, expected_sequence_dims=2, **kwargs):
-        """q, k & v need to have the same shape in all dimensions except in the `seq_axis` dimension.
-        In this sense, axial cross-attention is possible.
-
-        Args:
-            attn_module (nn.Module): Attention module to axialize.
-            seq_axis (int): axis in the input over which to apply attention.
-                All other (sequence) dimensions are regarded as separate samples in the batch
-            expected_sequence_dims (int, optional): number of sequence dimensions
-                (dimensions other than batch, heads and hidden).
-                Defaults to 2.
-        """
-        super().__init__()
-        self.attn = attn_module
-        ndim = expected_sequence_dims + 3
-        self.permute_to = (
-            [0] + [seq_axis] + list([i for i in range(1, ndim) if i != seq_axis])
-        )
-        permute_back = [0] + list([i for i in range(2, ndim)])
-        self.permute_back = permute_back[:seq_axis] + [1] + permute_back[seq_axis:]
-
-    def forward(self, q, k, v, mask = None, causal = False):
-        """Default attention layer
-
-        Parameters
-        ----------
-        q : B, *, NH, H, eg B L1 S NH H
-            queries
-        k : B, *, NH, H, eg B L2 S NH H
-            keys
-        v : B, *, NH, H, eg B L2 S NH H
-            values
-        mask : B, *, NH, L1, L2, optional, eg B, S, NH, L1, L2
-            _description_, by default None
-        causal : bool, optional
-            whether to do causal attention or not, by default False
-
-        Returns
-        -------
-        _type_
-            _description_
-        """
-        q_permuted = q.permute(*self.permute_to)
-        q_axial = rearrange(q_permuted, "b x ... n h -> (b ...) x n h")
-        k_axial = rearrange(k.permute(*self.permute_to), "b x ... n h -> (b ...) x n h")
-        v_axial = rearrange(v.permute(*self.permute_to), "b x ... n h -> (b ...) x n h")
-        if mask is not None:
-            mask = rearrange(mask, "b ... n l1 l2 -> (b ...) n l1 l2")
-        z = self.attn(q_axial, k_axial, v_axial, mask = mask, causal = causal)
-        return z.contiguous().view_as(q_permuted).permute(*self.permute_back)
-
-
-class FlattenAttention(nn.Module):
-    def __init__(self, attn_module, only_q=False, **kwargs):
-        super().__init__()
-        self.attn = attn_module
-        self.only_q = only_q
-
-    def forward(self, q, k, v, mask = None, causal = False):
-        assert mask is None, "this mode does not (yet) support masking"
-        assert not causal, "this mode does not support masking"
-
-        q_flat = rearrange(q, "b ... n h -> b (...) n h")
-        if not self.only_q:
-            k = rearrange(k, "b ... n h -> b (...) n h")
-            v = rearrange(v, "b ... n h -> b (...) n h")
-        z = self.attn(q_flat, k, v, mask = mask, causal = causal)
-        return z.view_as(q)
-
+            ).permute(0, 2, 1, 3).view(*q_shape)
 
 class AttnLayer(nn.Module):
     def __init__(self, dim, attn, nh=4, plugin=None):
@@ -342,10 +308,10 @@ class AttnLayer(nn.Module):
         self.plugin = plugin if plugin is not None else positional.Base()
 
     def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
-        self.plugin.mod_x(x, pos = pos, **mod_kwargs)
-        b, l, h = x.shape
+        x = self.plugin.mod_x(x, pos = pos, **mod_kwargs)
+        b, l, h = (x.size(0), x.size(-2), x.size(-1))
         q, k, v = torch.split(self.lin(x), h, dim=-1)
-        q, k, v = map(lambda t: t.reshape(b, l, self.nh, -1), (q, k, v))
+        q, k, v = map(lambda t: rearrange(t, "... (n h) -> ... n h", n = self.nh), (q, k, v))
 
         mod_kwargs |= {"pos_q_k": pos}
 
@@ -353,7 +319,7 @@ class AttnLayer(nn.Module):
 
         mask = self.plugin.mod_mask(mask, q, k, v, **mod_kwargs)
 
-        return self.attn(q, k, v, mask=mask, causal=causal).reshape(b, l, -1)
+        return rearrange(self.attn(q, k, v, mask=mask, causal=causal), "... n h -> ... (n h)", n = self.nh)
 
 
 class Residual(nn.Module):
@@ -416,37 +382,25 @@ class TransformerEncoder(nn.Module):
         depth,
         dim,
         nh,
-        attentiontype,
+        attentiontype = "vanilla",
         attention_args = {},
         plugintype="none",
         plugin_args = {},
-        apply_plugin_at_first = False,
+        only_apply_plugin_at_first = False,
         dropout=0.2,
         glu_ff=True,
         activation="swish",
     ):
         super().__init__()
 
-        if isinstance(attentiontype, list):
-            if len(attentiontype) == 2:
-                assert attentiontype[0] in ["flatten", "axial"]
-            assert len(attentiontype) <= 2
-        else:
-            attentiontype = [attentiontype]
-
-        assert attentiontype[-1] in ["vanilla", "random", "window"]
+        assert attentiontype in ["vanilla", "random", "window"]
         
-        if attentiontype[-1] == "vanilla":
+        if attentiontype == "vanilla":
             attn_op = Attention(**attention_args)
-        elif attentiontype[-1] == "random":
+        elif attentiontype == "random":
             attn_op = RandomAttention(**attention_args)
-        elif attentiontype[-1] == "window":
+        elif attentiontype == "window":
             attn_op = WindowAttention(**attention_args)
-        if len(attentiontype) == 2:
-            if attentiontype[0] == "flatten":
-                attn_op = FlattenAttention(attn_op, **attention_args)
-            elif attentiontype[0] == "axial":
-                attn_op = AxializeAttention(attn_op, **attention_args)
         
         if plugintype == "none":
             plugin = positional.Base()
@@ -465,19 +419,18 @@ class TransformerEncoder(nn.Module):
         elif plugintype == "XL":
             plugin = positional.XL(**plugin_args)
 
-
         layers = []
         layers.append(TransformerLayer(attn_op, dim, nh, plugin=plugin, dropout=dropout, glu_ff=glu_ff, activation=activation))
-        if apply_plugin_at_first:
+        if only_apply_plugin_at_first:
             for _ in range(depth-1):
                 layers.append(TransformerLayer(attn_op, dim, nh, plugin=plugin, dropout=dropout, glu_ff=glu_ff, activation=activation))
         else:
             for _ in range(depth-1):
                 layers.append(TransformerLayer(attn_op, dim, nh, plugin=None, dropout=dropout, glu_ff=glu_ff, activation=activation))
 
-        self.layer = nn.ModuleList(layers)
+        self.layers = nn.ModuleList(layers)
 
     def forward(self, x, pos = None, mask = None, causal = False, **mod_kwargs):
-        for layer in range(self.layers):
-            x = layer(x, pos = None, mask = None, causal = False, **mod_kwargs)
+        for layer in self.layers:
+            x = layer(x, pos = pos, mask = mask, causal = causal, **mod_kwargs)
         return x

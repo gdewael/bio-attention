@@ -53,7 +53,6 @@ pip install bio-attention
 - [ ] Tests
 - [ ] Typing
 - [ ] Docs
-- [ ] 
 
 
 # LEGACY documentation

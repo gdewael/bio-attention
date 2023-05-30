@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from einops import rearrange, repeat
+from einops import rearrange, repeat, einsum
 import math
 
 class Base(nn.Module):
@@ -32,20 +32,7 @@ class Base(nn.Module):
     @staticmethod
     def default_pos_x(x):
         return (
-            torch.arange(x.size(1), device=x.device).unsqueeze(0).expand(x.size(0), -1)
-        )
-
-    @staticmethod
-    def default_pos_mask(mask):
-        return (
-            torch.arange(mask.size(-2), device=mask.device)
-            .unsqueeze(0)
-            .expand(mask.size(0), -1)
-            .to(mask),
-            torch.arange(mask.size(-1), device=mask.device)
-            .unsqueeze(0)
-            .expand(mask.size(0), -1)
-            .to(mask),
+            torch.arange(x.size(-2), device = x.device).expand(*x.shape[:-1])
         )
 
 class Sinusoidal(Base):
@@ -67,9 +54,9 @@ class Sinusoidal(Base):
     def mod_x(self, x, pos=None, mask=None, **kwargs):
         """
         Args:
-            x (torch.tensor): (B,L,H)
-            pos (torch.tensor, optional): (B,L). Defaults to None for computing positions from 0 to L-1
-            mask (torch.tensor, optional): (B,L). A boolean mask to indicate where positions should not have positional encodings added.
+            x (torch.tensor): (B,*,L,H)
+            pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1 (only possible for 1-D sequence inputs x B,L,H).
+            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
                 Defaults to None for no masking
             **kwargs: ignored. Kept for compatibility.
 
@@ -107,9 +94,9 @@ class LearnedVocab(Base):
     def mod_x(self, x, pos=None, mask=None, **kwargs):
         """
         Args:
-            x (torch.tensor): (B,L,H)
-            pos (torch.tensor, optional): (B,L). Defaults to None for computing positions from 0 to L-1
-            mask (torch.tensor, optional): (B,L). A boolean mask to indicate where positions should not have positional encodings added.
+            x (torch.tensor): (B,*,H)
+            pos (torch.tensor, optional): (B,*). Defaults to None for computing positions from 0 to L-1 (only possible for 1-D sequence inputs x B,L,H).
+            mask (torch.tensor, optional): (B,*). A boolean mask to indicate where positions should not have positional encodings added.
                 Defaults to None for no masking
             **kwargs: ignored. Kept for compatibility.
 
@@ -126,14 +113,13 @@ class LearnedVocab(Base):
         return x + pos_emb
     
 class LearnedContinuous(Base):
-    def __init__(self, dim, depth=3, hdim = 4, norm = False, divide=1.0, learned_div=False):
+    def __init__(self, dim, depth=3, norm = False, divide=1.0, learned_div=False):
         """Learned embeddings with a continuity between absolute positional indices, as learned by a series of linear layers.
         Supports specifying positions, masking, and division of positional range.
 
         Args:
             dim (int): Hidden size of the embeddings
             depth (int, optional): number of hidden layers in the positional embedding network. Defaults to 3
-            hdim (int, optional): hidden dimension of the positional embedding network. Defaults to 4
             norm (bool, optional): Whether to use layernorms in the MLP. Defaults to False
             divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
             learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
@@ -143,9 +129,8 @@ class LearnedContinuous(Base):
         self.mlp = nn.ModuleList([])
         self.mlp.append(
             nn.Sequential(
-                nn.Linear(1, hdim),
-                nn.LayerNorm(hdim) if norm else nn.Identity(),
-                
+                nn.Linear(1, dim),
+                nn.LayerNorm(dim) if norm else nn.Identity(),
             )
         )
 
@@ -153,17 +138,17 @@ class LearnedContinuous(Base):
             self.mlp.append(
                 nn.Sequential(
                     nn.SiLU(),
-                    nn.Linear(hdim, hdim),
-                    nn.LayerNorm(hdim) if norm else nn.Identity(),
+                    nn.Linear(dim, dim),
+                    nn.LayerNorm(dim) if norm else nn.Identity(),
                 )
             )
 
     def mod_x(self, x, pos=None, mask=None, **kwargs):
         """
         Args:
-            x (torch.tensor): (B,L,H)
-            pos (torch.tensor, optional): (B,L). Defaults to None for computing positions from 0 to L-1
-            mask (torch.tensor, optional): (B,L). A boolean mask to indicate where positions should not have positional encodings added.
+            x (torch.tensor): (B,*,H)
+            pos (torch.tensor, optional): (B,*). Defaults to None for computing positions from 0 to L-1 (only possible for 1-D sequence inputs x B,L,H).
+            mask (torch.tensor, optional): (B,*). A boolean mask to indicate where positions should not have positional encodings added.
                 Defaults to None for no masking
             **kwargs: ignored. Kept for compatibility.
         Returns:
@@ -215,15 +200,15 @@ class Rotary(Base):
     ):
         """
         Args:
-            q (torch.tensor): (B,L1,NH,H)
-            k (torch.tensor): (B,L2,NH,H)
-            v (torch.tensor): (B,L2,NH,H)
+            q (torch.tensor): (B,*,NH,H)
+            k (torch.tensor): (B,*,NH,H)
+            v (torch.tensor): (B,*,NH,H)
             pos_q_k (torch.tensor, optional): (B, L). Positions of q and k in self attention mode. Requires L1 = L2.
-                Defaults to None for computing positions from 0 to L-1. 
-            pos_q (torch.tensor, optional): (B, L1). Positions of q in self attention mode.
-                Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B, L2). Positions of k in self attention mode.
-                Defaults to None for computing positions from 0 to L2-1
+                Defaults to None for computing positions from 0 to L-1 (only possible for 1-D sequence inputs x B,L,H).
+            pos_q (torch.tensor, optional): (B, L1). Positions of q in cross attention mode.
+                Defaults to None for computing positions from 0 to L1-1 (only possible for 1-D sequence inputs x B,L,H).
+            pos_k (torch.tensor, optional): (B, L2). Positions of k in cross attention mode.
+                Defaults to None for computing positions from 0 to L2-1 (only possible for 1-D sequence inputs x B,L,H).
             self_attn_mode (bool, optional): Whether to use the same positions for q and k (pos_q_k),
                 or use different positions for each (pos_q) and (pos_k).
                 Defaults to True.
@@ -232,14 +217,14 @@ class Rotary(Base):
             q, k, v (all torch.tensor)
         """
         if self_attn_mode:
-            pos_q_k = self.default_pos_x(q) if pos_q_k is None else pos_q_k
+            pos_q_k = self.default_pos_x(q[..., 0, :]) if pos_q_k is None else pos_q_k
             sin, cos = self.get_rotations(pos_q_k)
 
             q = q * cos.to(q) + self.rotate_every_two(q) * sin.to(q)
             k = k * cos.to(k) + self.rotate_every_two(k) * sin.to(k)
         else:
-            pos_q = self.default_pos_x(q) if pos_q is None else pos_q
-            pos_k = self.default_pos_x(k) if pos_k is None else pos_k
+            pos_q = self.default_pos_x(q[..., 0, :]) if pos_q is None else pos_q
+            pos_k = self.default_pos_x(k[..., 0, :]) if pos_k is None else pos_k
             sin_q, cos_q = self.get_rotations(pos_q)
             sin_k, cos_k = self.get_rotations(pos_k)
 
@@ -249,12 +234,12 @@ class Rotary(Base):
         return q, k, v
 
     def get_rotations(self, pos):
-        mthetas = torch.einsum("bi,j -> bij", self.apply_pos_division(pos).to(self.thetas), self.thetas)
+        mthetas = self.apply_pos_division(pos).to(self.thetas)[..., None] * self.thetas # B, *, h
         sin, cos = map(
-            lambda t: repeat(t, "b s h  -> b s (h j)", j=2),
+            lambda t: repeat(t, "b ... h  -> b ... (h j)", j=2),
             (mthetas.sin(), mthetas.cos()),
         )
-        sin, cos = map(lambda t: t.unsqueeze(2), (sin, cos))
+        sin, cos = map(lambda t: t.unsqueeze(-2), (sin, cos))
         return sin, cos
 
     @staticmethod
@@ -298,7 +283,7 @@ class ALiBi(Base):
             slopes = self._get_slopes(use_n_heads)
             slopes = [slopes[(i // 2) * 2] for i in range((len(slopes)))]
             slopes = torch.tensor(slopes + [0] * (n_heads - use_n_heads))
-        slopes = rearrange(slopes, "h -> 1 h 1 1")
+        slopes = rearrange(slopes, "h -> h 1 1")
         self.register_buffer("slopes", slopes)
 
         self.div = divide
@@ -306,31 +291,32 @@ class ALiBi(Base):
     def mod_mask(self, mask, q, k, v, pos_q_k = None, pos_q=None, pos_k=None, **kwargs):
         """
         Args:
-            mask (torch.tensor): (B, NH, L1, L2) or None
-            q (torch.tensor): (B,L1,NH,H)
-            k (torch.tensor): (B,L2,NH,H)
-            v (torch.tensor): (B,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B, L). Positions of q and k in self attention mode. Requires L1 = L2.
-                Defaults to None for computing positions from 0 to L-1. 
-            pos_q (torch.tensor, optional): (B, L1). Positions of q in self attention mode.
-                Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B, L2). Positions of k in self attention mode.
-                Defaults to None for computing positions from 0 to L2-1
+            mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
+            q (torch.tensor): (B,*,NH,H)
+            k (torch.tensor): (B,*,NH,H)
+            v (torch.tensor): (B,*,NH,H)
+            pos_q_k (torch.tensor, optional): (B, *) eg (B, L). Positions of q and k in self attention mode. Requires L1 = L2.
+                Defaults to None for computing positions from 0 to L-1 (only possible for 1-D sequence inputs x B,L,H).
+            pos_q (torch.tensor, optional): (B, *) eg (B, L1). Positions of q in cross attention mode.
+                Ignored if pos_q_k is specified
+                Defaults to None for computing positions from 0 to L1-1 (only possible for 1-D sequence inputs x B,L,H).
+            pos_k (torch.tensor, optional): (B, *) eg (B, L2). Positions of k in cross attention mode.
+                Ignored if pos_q_k is specified
+                Defaults to None for computing positions from 0 to L2-1 (only possible for 1-D sequence inputs x B,L,H).
             **kwargs: ignored. Kept for compatibility.
         Returns:
-            mask (torch.tensor): (B, NH, L1, L2)
+            mask (torch.tensor): (B, *, NH, L1, L2)
         """
 
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
-        if pos_q_k is not None:
-            pos_q = pos_k = pos_q_k
+        
         elif (pos_q is None) and (pos_k is None):
-            pos_q = self.default_pos_x(q) if pos_q is None else pos_q
-            pos_k = self.default_pos_x(k) if pos_k is None else pos_k
+            pos_q = self.default_pos_x(q[..., 0, :]) if pos_q is None else pos_q
+            pos_k = self.default_pos_x(k[..., 0, :]) if pos_k is None else pos_k
 
         relative_pos = pos_q[..., :, None] - pos_k[..., None, :]
-        bias = self.apply_pos_division(relative_pos[:, None] * self.slopes)
+        bias = self.apply_pos_division(relative_pos.unsqueeze(-3) * self.slopes)
 
         if self.asymmetric:
             bias = self.asymmetric_bias(bias)
@@ -405,25 +391,25 @@ class DPB(Base):
     def mod_mask(self, mask, q, k, v, pos_q_k = None, pos_q=None, pos_k=None, **kwargs):
         """
         Args:
-            mask (torch.tensor): (B, NH, L1, L2) or None
-            q (torch.tensor): (B,L1,NH,H)
-            k (torch.tensor): (B,L2,NH,H)
-            v (torch.tensor): (B,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B, L). Positions of q and k in self attention mode. Requires L1 = L2.
-                Defaults to None for computing positions from 0 to L-1. 
-            pos_q (torch.tensor, optional): (B, L1). Positions of q in self attention mode.
-                Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B, L2). Positions of k in self attention mode.
-                Defaults to None for computing positions from 0 to L2-1
+            mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
+            q (torch.tensor): (B,*,NH,H)
+            k (torch.tensor): (B,*,NH,H)
+            v (torch.tensor): (B,*,NH,H)
+            pos_q_k (torch.tensor, optional): (B, *). Positions of q and k in self attention mode. Requires L1 = L2.
+                Defaults to None for computing positions from 0 to L-1 (only possible for 1-D sequence inputs x B,L,H).
+            pos_q (torch.tensor, optional): (B, *). Positions of q in cross attention mode.
+                Defaults to None for computing positions from 0 to L1-1 (only possible for 1-D sequence inputs x B,L,H).
+            pos_k (torch.tensor, optional): (B, *). Positions of k in cross attention mode.
+                Defaults to None for computing positions from 0 to L2-1 (only possible for 1-D sequence inputs x B,L,H).
             **kwargs: ignored. Kept for compatibility.
         Returns:
-            mask (torch.tensor): (B, NH, L1, L2)
+            mask (torch.tensor): (B, *, NH, L1, L2)
         """
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
         elif (pos_q is None) and (pos_k is None):
-            pos_q = self.default_pos_x(q) if pos_q is None else pos_q
-            pos_k = self.default_pos_x(k) if pos_k is None else pos_k
+            pos_q = self.default_pos_x(q[..., 0, :]) if pos_q is None else pos_q
+            pos_k = self.default_pos_x(k[..., 0, :]) if pos_k is None else pos_k
 
         bias = self.apply_pos_division(pos_q[..., :, None] - pos_k[..., None, :])[
             ..., None
@@ -431,7 +417,7 @@ class DPB(Base):
 
         for layer in self.mlp:
             bias = layer(bias)
-        bias = bias.permute(0, 3, 1, 2).to(q)
+        bias = bias.transpose(-1, -2).transpose(-2, -3).to(q)
 
         return (0 if mask is None else mask) - bias
 
@@ -463,9 +449,9 @@ class XL(Base):
     def mod_qkv(self, q, k, v, **kwargs):
         """
         Args:
-            q (torch.tensor): (B,L1,NH,H)
-            k (torch.tensor): (B,L2,NH,H)
-            v (torch.tensor): (B,L2,NH,H)
+            q (torch.tensor): (B,*,NH,H)
+            k (torch.tensor): (B,*,NH,H)
+            v (torch.tensor): (B,*,NH,H)
         Returns:
             q, k, v (all torch.tensor)
         """
@@ -474,25 +460,25 @@ class XL(Base):
     def mod_mask(self, mask, q, k, v, pos_q_k = None, pos_q=None, pos_k=None, **kwargs):
         """
         Args:
-            mask (torch.tensor): (B, NH, L1, L2) or None
-            q (torch.tensor): (B,L1,NH,H)
-            k (torch.tensor): (B,L2,NH,H)
-            v (torch.tensor): (B,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B, L). Positions of q and k in self attention mode. Requires L1 = L2.
+            mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
+            q (torch.tensor): (B,*,NH,H)
+            k (torch.tensor): (B,*,NH,H)
+            v (torch.tensor): (B,*,NH,H)
+            pos_q_k (torch.tensor, optional): (B, *). Positions of q and k in self attention mode. Requires L1 = L2.
                 Defaults to None for computing positions from 0 to L-1. 
-            pos_q (torch.tensor, optional): (B, L1). Positions of q in self attention mode.
+            pos_q (torch.tensor, optional): (B, *). Positions of q in cross attention mode.
                 Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B, L2). Positions of k in self attention mode.
+            pos_k (torch.tensor, optional): (B, *). Positions of k in cross attention mode.
                 Defaults to None for computing positions from 0 to L2-1
             **kwargs: ignored. Kept for compatibility.
         Returns:
-            mask (torch.tensor): (B, NH, L1, L2)
+            mask (torch.tensor): (B, *, NH, L1, L2)
         """
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
         elif (pos_q is None) and (pos_k is None):
-            pos_q = self.default_pos_x(q) if pos_q is None else pos_q
-            pos_k = self.default_pos_x(k) if pos_k is None else pos_k
+            pos_q = self.default_pos_x(q[..., 0, :]) if pos_q is None else pos_q
+            pos_k = self.default_pos_x(k[..., 0, :]) if pos_k is None else pos_k
 
         relative_pos = (pos_q[..., :, None] - pos_k[..., None, :]).to(
             self.inv_freq.dtype
@@ -512,7 +498,7 @@ class XL(Base):
             h=q.shape[-1],
         )
         q_r = q + self.bias_r_w
-        BD = torch.einsum("bqnh,bqknh->bnqk", q_r, r)
+        BD = einsum(q_r, r, "... q n h, ... q k n h -> ... n q k")
         return (0 if mask is None else mask) + BD
 
     def _init_bias(self, bias):
