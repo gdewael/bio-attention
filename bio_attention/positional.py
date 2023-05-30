@@ -3,6 +3,7 @@ import torch.nn as nn
 from einops import rearrange, repeat, einsum
 import math
 
+
 class Base(nn.Module):
     def __init__(self, divide=1.0, learned=False):
         super().__init__()
@@ -16,7 +17,7 @@ class Base(nn.Module):
 
     def mod_x(self, x, pos=None, **kwargs):
         return x
-    
+
     def mod_qkv(self, q, k, v, pos=None, **kwargs):
         return q, k, v
 
@@ -31,9 +32,8 @@ class Base(nn.Module):
 
     @staticmethod
     def default_pos_x(x):
-        return (
-            torch.arange(x.size(-2), device = x.device).expand(*x.shape[:-1])
-        )
+        return torch.arange(x.size(-2), device=x.device).expand(*x.shape[:-1])
+
 
 class Sinusoidal(Base):
     def __init__(self, dim, divide=1.0, learned_div=False):
@@ -49,7 +49,6 @@ class Sinusoidal(Base):
         self.dim = dim
         inv_freq = 1 / (10000 ** (torch.arange(0.0, dim, 2) / dim))
         self.register_buffer("inv_freq", inv_freq)
-        
 
     def mod_x(self, x, pos=None, mask=None, **kwargs):
         """
@@ -77,6 +76,7 @@ class Sinusoidal(Base):
             pos_emb = pos_emb * mask.unsqueeze(-1)
 
         return x + pos_emb
+
 
 class LearnedVocab(Base):
     def __init__(self, dim, max_seq_len):
@@ -111,9 +111,10 @@ class LearnedVocab(Base):
         if mask is not None:
             pos_emb = pos_emb * mask.unsqueeze(-1)
         return x + pos_emb
-    
+
+
 class LearnedContinuous(Base):
-    def __init__(self, dim, depth=3, norm = False, divide=1.0, learned_div=False):
+    def __init__(self, dim, depth=3, norm=False, divide=1.0, learned_div=False):
         """Learned embeddings with a continuity between absolute positional indices, as learned by a series of linear layers.
         Supports specifying positions, masking, and division of positional range.
 
@@ -165,6 +166,7 @@ class LearnedContinuous(Base):
             pos_emb = pos_emb * mask.unsqueeze(-1)
         return x + pos_emb
 
+
 class Rotary(Base):
     def __init__(self, head_dim, n_dims=None, divide=1.0, learned_div=False):
         """Rotary embedding as in RoFormer / RoPE
@@ -195,7 +197,7 @@ class Rotary(Base):
         pos_q_k=None,
         pos_q=None,
         pos_k=None,
-        self_attn_mode = True,
+        self_attn_mode=True,
         **kwargs,
     ):
         """
@@ -234,7 +236,9 @@ class Rotary(Base):
         return q, k, v
 
     def get_rotations(self, pos):
-        mthetas = self.apply_pos_division(pos).to(self.thetas)[..., None] * self.thetas # B, *, h
+        mthetas = (
+            self.apply_pos_division(pos).to(self.thetas)[..., None] * self.thetas
+        )  # B, *, h
         sin, cos = map(
             lambda t: repeat(t, "b ... h  -> b ... (h j)", j=2),
             (mthetas.sin(), mthetas.cos()),
@@ -249,6 +253,7 @@ class Rotary(Base):
         x1, x2 = x.unbind(dim=-1)
         x = torch.stack((-x2, x1), dim=-1)
         return rearrange(x, "... d j -> ... (d j)")
+
 
 class ALiBi(Base):
     def __init__(
@@ -288,7 +293,7 @@ class ALiBi(Base):
 
         self.div = divide
 
-    def mod_mask(self, mask, q, k, v, pos_q_k = None, pos_q=None, pos_k=None, **kwargs):
+    def mod_mask(self, mask, q, k, v, pos_q_k=None, pos_q=None, pos_k=None, **kwargs):
         """
         Args:
             mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
@@ -310,7 +315,7 @@ class ALiBi(Base):
 
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
-        
+
         elif (pos_q is None) and (pos_k is None):
             pos_q = self.default_pos_x(q[..., 0, :]) if pos_q is None else pos_q
             pos_k = self.default_pos_x(k[..., 0, :]) if pos_k is None else pos_k
@@ -348,8 +353,11 @@ class ALiBi(Base):
         bias[:, 1::2][bias[:, 1::2] < 0] = torch.finfo(bias.dtype).max
         return bias
 
+
 class DPB(Base):
-    def __init__(self, dim, n_heads, depth=3, norm=False, divide=1.0, learned_div=False):
+    def __init__(
+        self, dim, n_heads, depth=3, norm=False, divide=1.0, learned_div=False
+    ):
         """Dynamic positional bias.
         Computes a bias to every element of the attention matrix based on their relative position via a parameterized MLP
         Described in https://arxiv.org/abs/2108.00154, https://arxiv.org/abs/2111.09883,
@@ -388,7 +396,7 @@ class DPB(Base):
 
         self.div = divide
 
-    def mod_mask(self, mask, q, k, v, pos_q_k = None, pos_q=None, pos_k=None, **kwargs):
+    def mod_mask(self, mask, q, k, v, pos_q_k=None, pos_q=None, pos_k=None, **kwargs):
         """
         Args:
             mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
@@ -420,6 +428,7 @@ class DPB(Base):
         bias = bias.transpose(-1, -2).transpose(-2, -3).to(q)
 
         return (0 if mask is None else mask) - bias
+
 
 class XL(Base):
     def __init__(self, dim, n_heads, divide=1, learned_div=False):
@@ -457,7 +466,7 @@ class XL(Base):
         """
         return q + self.bias_r_w, k, v
 
-    def mod_mask(self, mask, q, k, v, pos_q_k = None, pos_q=None, pos_k=None, **kwargs):
+    def mod_mask(self, mask, q, k, v, pos_q_k=None, pos_q=None, pos_k=None, **kwargs):
         """
         Args:
             mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
@@ -465,7 +474,7 @@ class XL(Base):
             k (torch.tensor): (B,*,NH,H)
             v (torch.tensor): (B,*,NH,H)
             pos_q_k (torch.tensor, optional): (B, *). Positions of q and k in self attention mode. Requires L1 = L2.
-                Defaults to None for computing positions from 0 to L-1. 
+                Defaults to None for computing positions from 0 to L-1.
             pos_q (torch.tensor, optional): (B, *). Positions of q in cross attention mode.
                 Defaults to None for computing positions from 0 to L1-1
             pos_k (torch.tensor, optional): (B, *). Positions of k in cross attention mode.
@@ -484,11 +493,9 @@ class XL(Base):
             self.inv_freq.dtype
         )
 
-        sinusoid_inp = self.apply_pos_division(
-            relative_pos[..., None] * self.inv_freq
-        )
+        sinusoid_inp = self.apply_pos_division(relative_pos[..., None] * self.inv_freq)
         pos_emb = torch.stack((sinusoid_inp.sin(), sinusoid_inp.cos()), dim=-1)
-        
+
         pos_emb = rearrange(pos_emb, "... d j -> ... (d j)")
 
         r = rearrange(
@@ -502,5 +509,5 @@ class XL(Base):
         return (0 if mask is None else mask) + BD
 
     def _init_bias(self, bias):
-        bound = 1/bias.size(1)**0.5
+        bound = 1 / bias.size(1) ** 0.5
         return nn.init.uniform_(bias, -bound, bound)

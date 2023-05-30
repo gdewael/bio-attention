@@ -54,40 +54,61 @@ class Attention(torch.nn.Module):
             _description_
         """
         q_shape = q.shape
-        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3), (q, k, v))
+        q, k, v = map(
+            lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3),
+            (q, k, v),
+        )
         if mask is not None:
             mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
         if self.use_context_manager:
             with torch.backends.cuda.sdp_kernel(**self.context_manager):
-                return F.scaled_dot_product_attention(
-                    q,k,v,
+                return (
+                    F.scaled_dot_product_attention(
+                        q,
+                        k,
+                        v,
+                        dropout_p=(self.dropout if self.training else 0),
+                        attn_mask=mask,
+                        is_causal=causal,
+                    )
+                    .permute(0, 2, 1, 3)
+                    .view(*q_shape)
+                )
+        else:
+            return (
+                F.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
                     dropout_p=(self.dropout if self.training else 0),
                     attn_mask=mask,
                     is_causal=causal,
-                ).permute(0, 2, 1, 3).view(*q_shape)
-        else:
-            return F.scaled_dot_product_attention(
-                q,k,v,
-                dropout_p=(self.dropout if self.training else 0),
-                attn_mask=mask,
-                is_causal=causal,
-            ).permute(0, 2, 1, 3).view(*q_shape)
+                )
+                .permute(0, 2, 1, 3)
+                .view(*q_shape)
+            )
 
 
 class RandomAttention(nn.Module):
-    def __init__(self, n_random_keys=64, dropout=0.2, materialize_full = False, **kwargs,):
+    def __init__(
+        self,
+        n_random_keys=64,
+        dropout=0.2,
+        materialize_full=False,
+        **kwargs,
+    ):
         super().__init__()
         if not materialize_full:
             self.softmax = nn.Softmax(dim=-2)
             self.dropout = nn.Dropout(dropout)
-            
+
             self.forward = self.forward_indexed
         else:
             self.dropout = dropout
             self.forward = self.forward_naive
         self.n = n_random_keys
 
-    def forward_indexed(self, q, k, v, mask = None, causal = False):
+    def forward_indexed(self, q, k, v, mask=None, causal=False):
         """random attention layer
 
         NOTE: causal attention will erase input masks
@@ -116,13 +137,21 @@ class RandomAttention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h"), (q, k, v))
         if mask is not None:
             mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
-        
+
         b, s2, nh, h = k.shape
         s1 = q.shape[1]
 
-        mask = torch.ones(b, nh, s1, s2, dtype=torch.bool).tril(diagonal=0) if causal else mask
+        mask = (
+            torch.ones(b, nh, s1, s2, dtype=torch.bool).tril(diagonal=0)
+            if causal
+            else mask
+        )
         if mask is not None:
-            mask = (~mask).float().masked_fill(~mask, -float('inf')) if mask.dtype==torch.bool else mask
+            mask = (
+                (~mask).float().masked_fill(~mask, -float("inf"))
+                if mask.dtype == torch.bool
+                else mask
+            )
             mask = mask.to(q)
 
         q = q * (h**-0.5)
@@ -131,16 +160,15 @@ class RandomAttention(nn.Module):
         indexer = torch.arange(b).view(b, 1, 1)
         if mask is not None:
             mask = mask.permute(0, 2, 3, 1)[
-                indexer,
-                torch.arange(s1)[None, :, None],
-                indices_select
-                ].permute(0, 3, 1, 2)
+                indexer, torch.arange(s1)[None, :, None], indices_select
+            ].permute(0, 3, 1, 2)
 
-        
         k = k[indexer, indices_select]
         v = v[indexer, indices_select]
 
-        A = einsum("b q n h, b q k n h -> b q k n", q, k) + (0 if mask is None else mask.permute(0, 2, 3, 1))
+        A = einsum("b q n h, b q k n h -> b q k n", q, k) + (
+            0 if mask is None else mask.permute(0, 2, 3, 1)
+        )
         A = self.softmax(A)
 
         A = self.dropout(A)
@@ -148,7 +176,7 @@ class RandomAttention(nn.Module):
 
         return z.view(*q_shape)
 
-    def forward_naive(self, q, k, v, mask = None, causal = False):
+    def forward_naive(self, q, k, v, mask=None, causal=False):
         """NOTE: Is incompatible with causal attention.
         NOTE: Is incompatible with input masks attention.
 
@@ -163,27 +191,44 @@ class RandomAttention(nn.Module):
             _type_: _description_
         """
         q_shape = q.shape
-        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3), (q, k, v))
+        q, k, v = map(
+            lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3),
+            (q, k, v),
+        )
         if mask is not None:
             mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
 
         b, nh, s2, h = k.shape
         s1 = q.shape[-2]
 
-        mask = (torch.rand(b, 1, s1, s2) < (self.n/s2)).expand(-1, nh, -1, -1).to(k.device)
+        mask = (
+            (torch.rand(b, 1, s1, s2) < (self.n / s2))
+            .expand(-1, nh, -1, -1)
+            .to(k.device)
+        )
 
-        return F.scaled_dot_product_attention(
+        return (
+            F.scaled_dot_product_attention(
                 q,
                 k,
                 v,
                 dropout_p=(self.dropout if self.training else 0),
                 attn_mask=mask,
                 is_causal=causal,
-            ).permute(0, 2, 1, 3).view(*q_shape)
+            )
+            .permute(0, 2, 1, 3)
+            .view(*q_shape)
+        )
 
 
 class WindowAttention(nn.Module):
-    def __init__(self, window = 5, dropout=0.1, materialize_full = False, **kwargs,):
+    def __init__(
+        self,
+        window=5,
+        dropout=0.1,
+        materialize_full=False,
+        **kwargs,
+    ):
         super().__init__()
         assert window % 2 == 1, "Window size should be an odd integer."
 
@@ -205,7 +250,7 @@ class WindowAttention(nn.Module):
             self.dropout = dropout
             self.forward = self.forward_naive
 
-    def forward_sliced(self, q, k, v, mask= None, causal = False):
+    def forward_sliced(self, q, k, v, mask=None, causal=False):
         """windowed attention layer
 
         Parameters
@@ -264,7 +309,7 @@ class WindowAttention(nn.Module):
                 self.mask_k_left.to(A.device), mask_k_right
             ).unsqueeze(0)
         if causal:
-            mask = ~(~mask).tril(diagonal = self.w)
+            mask = ~(~mask).tril(diagonal=self.w)
 
         A.masked_fill_(mask, mask_value)
         A = self.softmax(A)
@@ -275,26 +320,40 @@ class WindowAttention(nn.Module):
 
         return z
 
-    def forward_naive(self, q, k, v, mask=None, causal = False):
+    def forward_naive(self, q, k, v, mask=None, causal=False):
         assert mask is None
         assert k.shape[-3] == q.shape[-3], "q and k should have same input length."
 
         q_shape = q.shape
-        q, k, v = map(lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3), (q, k, v))
+        q, k, v = map(
+            lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3),
+            (q, k, v),
+        )
 
         b, nh, s2, h = k.shape
         s1 = q.shape[-2]
 
-        u = torch.triu(torch.full((s1, s2), True), diagonal = -self.w)
-        mask = torch.logical_and(u, torch.flip(u, [0, 1])).expand(b, nh, -1, -1).to(k.device)
+        u = torch.triu(torch.full((s1, s2), True), diagonal=-self.w)
+        mask = (
+            torch.logical_and(u, torch.flip(u, [0, 1]))
+            .expand(b, nh, -1, -1)
+            .to(k.device)
+        )
         if causal:
             mask = torch.tril(mask)
-        return F.scaled_dot_product_attention(
-                q,k,v,
+        return (
+            F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
                 dropout_p=(self.dropout if self.training else 0),
                 attn_mask=mask,
                 is_causal=False,
-            ).permute(0, 2, 1, 3).view(*q_shape)
+            )
+            .permute(0, 2, 1, 3)
+            .view(*q_shape)
+        )
+
 
 class AttnLayer(nn.Module):
     def __init__(self, dim, attn, nh=4, plugin=None):
@@ -308,10 +367,12 @@ class AttnLayer(nn.Module):
         self.plugin = plugin if plugin is not None else positional.Base()
 
     def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
-        x = self.plugin.mod_x(x, pos = pos, **mod_kwargs)
+        x = self.plugin.mod_x(x, pos=pos, **mod_kwargs)
         b, l, h = (x.size(0), x.size(-2), x.size(-1))
         q, k, v = torch.split(self.lin(x), h, dim=-1)
-        q, k, v = map(lambda t: rearrange(t, "... (n h) -> ... n h", n = self.nh), (q, k, v))
+        q, k, v = map(
+            lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
+        )
 
         mod_kwargs |= {"pos_q_k": pos}
 
@@ -319,7 +380,11 @@ class AttnLayer(nn.Module):
 
         mask = self.plugin.mod_mask(mask, q, k, v, **mod_kwargs)
 
-        return rearrange(self.attn(q, k, v, mask=mask, causal=causal), "... n h -> ... (n h)", n = self.nh)
+        return rearrange(
+            self.attn(q, k, v, mask=mask, causal=causal),
+            "... n h -> ... (n h)",
+            n=self.nh,
+        )
 
 
 class Residual(nn.Module):
@@ -371,7 +436,7 @@ class TransformerLayer(nn.Module):
             )
         )
 
-    def forward(self, x, pos = None, mask = None, causal = False, **mod_kwargs):
+    def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
         x = self.attn(self.norm(x), pos=pos, mask=mask, causal=causal, **mod_kwargs) + x
         return self.ff(x)
 
@@ -382,11 +447,11 @@ class TransformerEncoder(nn.Module):
         depth,
         dim,
         nh,
-        attentiontype = "vanilla",
-        attention_args = {},
+        attentiontype="vanilla",
+        attention_args={},
         plugintype="none",
-        plugin_args = {},
-        only_apply_plugin_at_first = False,
+        plugin_args={},
+        only_apply_plugin_at_first=False,
         dropout=0.2,
         glu_ff=True,
         activation="swish",
@@ -394,14 +459,14 @@ class TransformerEncoder(nn.Module):
         super().__init__()
 
         assert attentiontype in ["vanilla", "random", "window"]
-        
+
         if attentiontype == "vanilla":
             attn_op = Attention(**attention_args)
         elif attentiontype == "random":
             attn_op = RandomAttention(**attention_args)
         elif attentiontype == "window":
             attn_op = WindowAttention(**attention_args)
-        
+
         if plugintype == "none":
             plugin = positional.Base()
         elif plugintype == "sinusoidal":
@@ -420,17 +485,47 @@ class TransformerEncoder(nn.Module):
             plugin = positional.XL(**plugin_args)
 
         layers = []
-        layers.append(TransformerLayer(attn_op, dim, nh, plugin=plugin, dropout=dropout, glu_ff=glu_ff, activation=activation))
+        layers.append(
+            TransformerLayer(
+                attn_op,
+                dim,
+                nh,
+                plugin=plugin,
+                dropout=dropout,
+                glu_ff=glu_ff,
+                activation=activation,
+            )
+        )
         if only_apply_plugin_at_first:
-            for _ in range(depth-1):
-                layers.append(TransformerLayer(attn_op, dim, nh, plugin=plugin, dropout=dropout, glu_ff=glu_ff, activation=activation))
+            for _ in range(depth - 1):
+                layers.append(
+                    TransformerLayer(
+                        attn_op,
+                        dim,
+                        nh,
+                        plugin=plugin,
+                        dropout=dropout,
+                        glu_ff=glu_ff,
+                        activation=activation,
+                    )
+                )
         else:
-            for _ in range(depth-1):
-                layers.append(TransformerLayer(attn_op, dim, nh, plugin=None, dropout=dropout, glu_ff=glu_ff, activation=activation))
+            for _ in range(depth - 1):
+                layers.append(
+                    TransformerLayer(
+                        attn_op,
+                        dim,
+                        nh,
+                        plugin=None,
+                        dropout=dropout,
+                        glu_ff=glu_ff,
+                        activation=activation,
+                    )
+                )
 
         self.layers = nn.ModuleList(layers)
 
-    def forward(self, x, pos = None, mask = None, causal = False, **mod_kwargs):
+    def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
         for layer in self.layers:
-            x = layer(x, pos = pos, mask = mask, causal = causal, **mod_kwargs)
+            x = layer(x, pos=pos, mask=mask, causal=causal, **mod_kwargs)
         return x

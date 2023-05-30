@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 class DiscreteEmbedding(nn.Module):
     def __init__(
         self,
@@ -48,8 +49,8 @@ class ContinuousEmbedding(nn.Module):
     def __init__(
         self,
         embedding_dim,
-        depth = 1,
-        norm = False,
+        depth=1,
+        norm=False,
         cls=False,
         cls_axis=-2,
         init_cls_as_bias=False,
@@ -82,7 +83,7 @@ class ContinuousEmbedding(nn.Module):
         self.embedder = nn.Sequential(*layers)
 
         with torch.no_grad():
-            bias = self.embedder(torch.tensor([[0.]])).unsqueeze(0)
+            bias = self.embedder(torch.tensor([[0.0]])).unsqueeze(0)
 
         if init_mask_as_bias:
             self.mask_embedding = nn.Parameter(bias)
