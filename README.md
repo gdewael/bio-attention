@@ -12,6 +12,11 @@ Simple implementations of attention modules adapted for the biological data doma
 
 Don't look for stability here (yet).
 
+## Why use this package?
+
+There are already plenty of excellent implementations out there that allow you to test out the countless variants of transformers [[1]](https://github.com/facebookresearch/xformers), [[2]](https://github.com/lucidrains/x-transformers).
+This repository primarily separates itself from the previous in that it contains positional encodings schemes adapted to allow for irregularly-spaced positions in sequences.
+
 ## Install
 Since PyTorch is a dependency of `bio-attention`, we recommend [installing PyTorch](https://pytorch.org/get-started/locally/) independently first, as your system may require a specific version (e.g. CUDA drivers).
 
