@@ -25,6 +25,10 @@ After PyTorch installation, `bio-attention` can be installed using `pip`
 pip install bio-attention
 ```
 
+## Note
+
+This package used the be a 2D sliding window attention package. The current formulation of the package does not allow for this type of attention anymore (instead, I recommend to perform axial attention with alternating sliding window attention across one axis and full self-attention across the other). If you want to use 2D sliding window attention, check out the [old version of this repo](https://github.com/gdewael/bio-attention/tree/ac3cb87906a2ff7adf9de393a5d2bbd3bf11eef3).
+
 ## Usage
 
 ## Package roadmap
