@@ -68,7 +68,7 @@ class Sinusoidal(Base):
         assert shp[-1] == self.dim
 
         pos_emb = self.default_pos_x(x).to(self.inv_freq) if pos is None else pos
-        shp[-2] = pos_emb.shape[-2]
+        shp[-2] = pos_emb.shape[-1]
 
         sinusoid_inp = self.apply_pos_division(pos_emb.unsqueeze(-1) * self.inv_freq)
         pos_emb = (
