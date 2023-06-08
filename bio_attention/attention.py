@@ -33,8 +33,6 @@ class Attention(torch.nn.Module):
     def forward(self, q, k, v, mask=None, causal=False):
         """Default attention layer
 
-        NOTE: causal attention will erase input masks
-
         Parameters
         ----------
         q : B, *, L1, NH, H
@@ -57,9 +55,15 @@ class Attention(torch.nn.Module):
         q, k, v = map(
             lambda t: rearrange(t, "b ... x n h -> (b ...) x n h").permute(0, 2, 1, 3),
             (q, k, v),
-        )
+        ) # (B...), NH, L, H
         if mask is not None:
-            mask = rearrange(mask, "b ... n q k -> (b ...) n q k")
+            mask = rearrange(mask, "b ... n q k -> (b ...) n q k") # (B...), NH, L1, L2
+
+        if causal:
+            causal_mask = torch.ones(q.shape[-2], k.shape[-2], dtype=torch.bool)
+            causal_mask = causal_mask.triu(diagonal=0).expand(q.shape[0], q.shape[1], -1, -1)
+            mask = (mask if mask is not None else (causal_mask).to(q)).masked_fill(causal_mask, -float('inf'))
+
         if self.use_context_manager:
             with torch.backends.cuda.sdp_kernel(**self.context_manager):
                 return (
@@ -69,7 +73,7 @@ class Attention(torch.nn.Module):
                         v,
                         dropout_p=(self.dropout if self.training else 0),
                         attn_mask=mask,
-                        is_causal=causal,
+                        is_causal=False,
                     )
                     .permute(0, 2, 1, 3)
                     .view(*q_shape)
@@ -82,7 +86,7 @@ class Attention(torch.nn.Module):
                     v,
                     dropout_p=(self.dropout if self.training else 0),
                     attn_mask=mask,
-                    is_causal=causal,
+                    is_causal=False,
                 )
                 .permute(0, 2, 1, 3)
                 .view(*q_shape)
@@ -441,7 +445,7 @@ class TransformerLayer(nn.Module):
         return self.ff(x)
 
 
-class TransformerEncoder(nn.Module):
+class Transformer(nn.Module):
     def __init__(
         self,
         depth,
@@ -496,36 +500,40 @@ class TransformerEncoder(nn.Module):
                 activation=activation,
             )
         )
-        if only_apply_plugin_at_first:
-            for _ in range(depth - 1):
-                layers.append(
-                    TransformerLayer(
-                        attn_op,
-                        dim,
-                        nh,
-                        plugin=plugin,
-                        dropout=dropout,
-                        glu_ff=glu_ff,
-                        activation=activation,
-                    )
+        
+        for _ in range(depth - 1):
+            layers.append(
+                TransformerLayer(
+                    attn_op,
+                    dim,
+                    nh,
+                    plugin=(None if only_apply_plugin_at_first else plugin),
+                    dropout=dropout,
+                    glu_ff=glu_ff,
+                    activation=activation,
                 )
-        else:
-            for _ in range(depth - 1):
-                layers.append(
-                    TransformerLayer(
-                        attn_op,
-                        dim,
-                        nh,
-                        plugin=None,
-                        dropout=dropout,
-                        glu_ff=glu_ff,
-                        activation=activation,
-                    )
-                )
+            )
+    
 
         self.layers = nn.ModuleList(layers)
 
     def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
         for layer in self.layers:
             x = layer(x, pos=pos, mask=mask, causal=causal, **mod_kwargs)
+        return x
+
+class TransformerEncoder(Transformer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    def forward(self, x, pos=None, mask=None, **mod_kwargs):
+        for layer in self.layers:
+            x = layer(x, pos=pos, mask=mask, causal=False, **mod_kwargs)
+        return x
+    
+class TransformerDecoder(Transformer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    def forward(self, x, pos=None, mask=None, **mod_kwargs):
+        for layer in self.layers:
+            x = layer(x, pos=pos, mask=mask, causal=True, **mod_kwargs)
         return x
