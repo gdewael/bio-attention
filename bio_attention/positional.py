@@ -546,7 +546,7 @@ class XL(Base):
         )
 
         l1, l2 = q.shape[-3], k.shape[-3]
-        r_l1, r_l2 = r.shape[-2], r.shape[-1]
+        r_l1, r_l2 = r.shape[-4], r.shape[-3]
         if (l1 != r_l1) or (l2 != r_l2):
             r = F.pad(r, (0, 0, 0, 0, l2-r_l2, 0, l1-r_l1, 0))
 
