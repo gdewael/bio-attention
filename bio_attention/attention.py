@@ -537,3 +537,24 @@ class TransformerDecoder(Transformer):
         for layer in self.layers:
             x = layer(x, pos=pos, mask=mask, causal=True, **mod_kwargs)
         return x
+
+
+class Aggregator(nn.Module):
+    def __init__(self, method = "max"):
+        super().__init__()
+        assert method in ["mean", "max", "cls"]
+        self.method = method
+
+    def forward(self, x, mask = None):
+        """
+        X = B, *, L, H
+        mask = B, *, L
+        """
+        if mask is not None:
+            x = x * mask.unsqueeze(-1)
+        if self.method == "mean":
+            return x.sum(-2) / (mask.sum(-1, keepdim=True) if mask is not None else x.shape[-2])
+        elif self.method == "max":
+            return x.max(-2).values
+        elif self.method == "cls":
+            return x[..., 0, :]
