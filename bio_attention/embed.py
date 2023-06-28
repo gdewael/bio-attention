@@ -11,8 +11,10 @@ class DiscreteEmbedding(nn.Module):
         cls_axis=-2,
         init_cls_as_mask=False,
     ):
-        """Embedding module for discrete data. Uses `nn.Embedding` with added support for masking tokens cls tokens.
+        """Embedding module for discrete data. Uses `nn.Embedding` with added support for masking tokens and cls tokens.
         Masking tokens are recognized as torch.nans. Therefore, input should be float dtype.
+        WARNING: Because this module expects a float dtype for what should be integers, there is a limit to the vocab size you can effectively accurately represent.
+        In practice, vocab sizes up to 1 million in size should be faithfully represented with float32. For float16, expect issues.
 
         Args:
             num_embeddings (int): number of discrete classes.
