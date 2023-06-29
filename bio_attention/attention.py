@@ -1,6 +1,6 @@
 import torch
 from torch import nn, einsum
-from einops import rearrange
+from einops import rearrange, repeat
 import torch.nn.functional as F
 import math
 from bio_attention import positional
@@ -274,6 +274,8 @@ class WindowAttention(nn.Module):
         -------
         _type_
             _description_
+
+        NOTE: incompatible with user-defined masks
         """
         assert mask is None
 
@@ -376,7 +378,18 @@ class AttnLayer(nn.Module):
         q, k, v = torch.split(self.lin(x), h, dim=-1)
         q, k, v = map(
             lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
-        )
+        ) # B, *, L, NH, H
+
+        if mask is not None:
+            assert mask.shape[-1] == q.shape[-3]
+            if q.ndim - mask.ndim == 2: #B, *, L -> B, *, L, L
+                mask = repeat(mask, '... l -> ... (l2) l', l2=mask.shape[-1])
+            if q.ndim - mask.ndim == 1: #B, *, L, L  -> B, *, NH, L, L
+                mask = repeat(mask, '... l1 l2 -> ... nh l1 l2', nh=q.shape[-2])
+            assert mask.shape[:-3] == q.shape[:-3]
+
+            if mask.dtype == torch.bool:
+                mask = (~mask).to(q).masked_fill(~mask, -float('inf'))
 
         mod_kwargs |= {"pos_q_k": pos}
 
@@ -389,7 +402,6 @@ class AttnLayer(nn.Module):
             "... n h -> ... (n h)",
             n=self.nh,
         )
-
 
 class Residual(nn.Module):
     def __init__(self, fn):
