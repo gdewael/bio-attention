@@ -375,26 +375,33 @@ class AttnLayer(nn.Module):
     def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
         """
         MASK = is used by mod_x - type positional embeddings if it is of bool type and shape B, *, L
-        MASK can be (B,*,L), (B,*,L,L), or (B,, * NH, L, L).
+        MASK can be (B,*,L), (B,*,L,L), or (B, * NH, L, L).
+        x = (B, *, L, H)
         """
+        if (mask is not None) and (mask.dtype == torch.bool):
+            mask = F.pad(mask,(x.shape[-2] - mask.shape[-1], 0), value = True)
+
         use_mask_to_mod_x = False
         if mask is not None:
             use_mask_to_mod_x = (mask.dtype == torch.bool) and (mask.shape == x.shape[:-1])
+
         x = self.plugin.mod_x(x, pos=pos, mask = (mask if use_mask_to_mod_x else None), **mod_kwargs)
-        b, l, h = (x.size(0), x.size(-2), x.size(-1))
-        q, k, v = torch.split(self.lin(x), h, dim=-1)
+        q, k, v = torch.split(self.lin(x), x.size(-1), dim=-1)
         q, k, v = map(
             lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
         ) # B, *, L, NH, H
         if mask is not None:
             if q.ndim - mask.ndim == 2: #B, *, L -> B, *, L, L
                 mask = repeat(mask, '... l -> ... (l2) l', l2=mask.shape[-1])
+                
             if q.ndim - mask.ndim == 1: #B, *, L, L  -> B, *, NH, L, L
                 mask = repeat(mask, '... l1 l2 -> ... nh l1 l2', nh=q.shape[-2])
+            
             assert mask.shape[:-3] == q.shape[:-3]
-
             if mask.dtype == torch.bool:
                 mask = (~mask).to(q).masked_fill(~mask, -float('inf'))
+
+            mask = F.pad(mask, (k.shape[-3] - mask.shape[-1], 0, (q.shape[-3] - mask.shape[-2]), 0), value = 0)
 
         mod_kwargs |= {"pos_q_k": pos}
 
