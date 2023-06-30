@@ -387,7 +387,6 @@ class AttnLayer(nn.Module):
             lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
         ) # B, *, L, NH, H
         if mask is not None:
-            assert mask.shape[-1] == q.shape[-3]
             if q.ndim - mask.ndim == 2: #B, *, L -> B, *, L, L
                 mask = repeat(mask, '... l -> ... (l2) l', l2=mask.shape[-1])
             if q.ndim - mask.ndim == 1: #B, *, L, L  -> B, *, NH, L, L
