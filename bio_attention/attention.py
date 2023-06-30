@@ -373,13 +373,19 @@ class AttnLayer(nn.Module):
         self.plugin = plugin if plugin is not None else positional.Base()
 
     def forward(self, x, pos=None, mask=None, causal=False, **mod_kwargs):
-        x = self.plugin.mod_x(x, pos=pos, **mod_kwargs)
+        """
+        MASK = is used by mod_x - type positional embeddings if it is of bool type and shape B, *, L
+        MASK can be (B,*,L), (B,*,L,L), or (B,, * NH, L, L).
+        """
+        use_mask_to_mod_x = False
+        if mask is not None:
+            use_mask_to_mod_x = (mask.dtype == torch.bool) and (mask.shape == x.shape[:-1])
+        x = self.plugin.mod_x(x, pos=pos, mask = (mask if use_mask_to_mod_x else None), **mod_kwargs)
         b, l, h = (x.size(0), x.size(-2), x.size(-1))
         q, k, v = torch.split(self.lin(x), h, dim=-1)
         q, k, v = map(
             lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
         ) # B, *, L, NH, H
-
         if mask is not None:
             assert mask.shape[-1] == q.shape[-3]
             if q.ndim - mask.ndim == 2: #B, *, L -> B, *, L, L

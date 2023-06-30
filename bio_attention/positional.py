@@ -39,7 +39,7 @@ class Base(nn.Module):
 class Sinusoidal(Base):
     def __init__(self, dim, divide=1.0, learned_div=False):
         """Sinusoidal positional embedding as in Vaswani et al. (2017)
-        Supports specifying positions and division of positional range.
+        Supports specifying positions, masking, and division of positional range.
 
         Args:
             dim (int): Hidden size of the embeddings
@@ -51,13 +51,15 @@ class Sinusoidal(Base):
         inv_freq = 1 / (10000 ** (torch.arange(0.0, dim, 2) / dim))
         self.register_buffer("inv_freq", inv_freq)
 
-    def mod_x(self, x, pos=None, **kwargs):
+    def mod_x(self, x, pos=None, mask=None, **kwargs):
         """
         Args:
             x (torch.tensor): (B,*,L,H)
             pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1
+            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
+                Defaults to None for no masking
             **kwargs: ignored. Kept for compatibility.
-
+            
         Returns:
             torch.tensor: x with added sinusoidal embeddings.
         """
@@ -74,6 +76,11 @@ class Sinusoidal(Base):
             .view(*shp)
             .to(x.dtype)
         )
+
+        if mask is not None:
+            assert mask.dtype == torch.bool
+            mask = F.pad(mask, (pos_emb.shape[-2]-mask.shape[-1], 0), value=True)
+            pos_emb = pos_emb * mask.unsqueeze(-1)
 
         if l != shp[-2]:
             pos_emb = F.pad(pos_emb, (0, 0, l-shp[-2], 0))
@@ -94,11 +101,13 @@ class LearnedVocab(Base):
         super().__init__()
         self.emb = nn.Embedding(max_seq_len, dim)
 
-    def mod_x(self, x, pos=None, **kwargs):
+    def mod_x(self, x, pos=None, mask = None, **kwargs):
         """
         Args:
             x (torch.tensor): (B,*,L,H)
             pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1
+            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
+                Defaults to None for no masking
             **kwargs: ignored. Kept for compatibility.
 
         Returns:
@@ -109,6 +118,11 @@ class LearnedVocab(Base):
         pos = self.default_pos_x(x).long() if pos is None else pos
 
         pos_emb = self.emb(pos)
+
+        if mask is not None:
+            assert mask.dtype == torch.bool
+            mask = F.pad(mask, (pos_emb.shape[-2]-mask.shape[-1], 0), value=True)
+            pos_emb = pos_emb * mask.unsqueeze(-1)
 
         l = pos_emb.shape[-2]
         if l != shp[-2]:
@@ -148,12 +162,15 @@ class LearnedContinuous(Base):
                 )
             )
 
-    def mod_x(self, x, pos=None, **kwargs):
+    def mod_x(self, x, pos=None, mask=None, **kwargs):
         """
         Args:
             x (torch.tensor): (B,*,L,H)
             pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1
+            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
+                Defaults to None for no masking
             **kwargs: ignored. Kept for compatibility.
+            
         Returns:
             torch.tensor: x with added learned embeddings.
         """
@@ -164,6 +181,11 @@ class LearnedContinuous(Base):
         pos_emb = self.apply_pos_division(pos).unsqueeze(-1)
         for layer in self.mlp:
             pos_emb = layer(pos_emb)
+
+        if mask is not None:
+            assert mask.dtype == torch.bool
+            mask = F.pad(mask, (pos_emb.shape[-2]-mask.shape[-1], 0), value=True)
+            pos_emb = pos_emb * mask.unsqueeze(-1)
 
         l = pos_emb.shape[-2]
         if l != shp[-2]:
