@@ -717,7 +717,7 @@ class Transformer(nn.Module):
         input and output hidden dimension of x
     nh : int
         number of heads, dim should be divisible by this number
-    attentiontype : Literal[&quot;vanilla&quot;, &quot;random&quot;, &quot;window&quot;], optional
+    attentiontype : Literal["vanilla", "random", "window"], optional
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
@@ -867,7 +867,7 @@ class TransformerEncoder(Transformer):
         input and output hidden dimension of x
     nh : int
         number of heads, dim should be divisible by this number
-    attentiontype : Literal[&quot;vanilla&quot;, &quot;random&quot;, &quot;window&quot;], optional
+    attentiontype : Literal["vanilla", "random", "window"], optional
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
@@ -912,7 +912,7 @@ class TransformerDecoder(Transformer):
         input and output hidden dimension of x
     nh : int
         number of heads, dim should be divisible by this number
-    attentiontype : Literal[&quot;vanilla&quot;, &quot;random&quot;, &quot;window&quot;], optional
+    attentiontype : Literal["vanilla", "random", "window"], optional
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
@@ -946,14 +946,15 @@ class TransformerDecoder(Transformer):
 
 
 class Aggregator(nn.Module):
-    def __init__(self, method: Literal["mean", "max", "cls"] = "max"):
-        """Aggregator module. Can be used to get a single vector from a sequence-valued input.
+    """Aggregator module. Can be used to get a single vector from a sequence-valued input.
 
-        Parameters
-        ----------
-        method : Literal["mean", "max", "cls"], optional
-            aggregation method, by default "max"
-        """
+    Parameters
+    ----------
+    method : Literal["mean", "max", "cls"], optional
+        aggregation method, by default "max"
+    """
+    def __init__(self, method: Literal["mean", "max", "cls"] = "max"):
+        
         super().__init__()
         assert method in ["mean", "max", "cls"]
         self.method = method

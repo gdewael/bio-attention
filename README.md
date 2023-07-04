@@ -61,4 +61,4 @@ This package used the be a 2D sliding window attention package. The current form
 - [ ] Add docs clarifying that clf tokens are automatically accounted for if no pos is provided for them
 - [ ] Tests
 - [x] Typing
-- [ ] Docs
+- [x] Docs
