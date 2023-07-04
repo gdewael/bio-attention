@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat, einsum
 import math
+from typing import Optional, Tuple
 
 
 class Base(nn.Module):
@@ -37,31 +38,50 @@ class Base(nn.Module):
 
 
 class Sinusoidal(Base):
-    def __init__(self, dim, divide=1.0, learned_div=False):
-        """Sinusoidal positional embedding as in Vaswani et al. (2017)
-        Supports specifying positions, masking, and division of positional range.
+    """Sinusoidal positional embedding as in Vaswani et al. (2017)
+    Supports specifying positions, masking, and division of positional range.
 
-        Args:
-            dim (int): Hidden size of the embeddings
-            divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
-            learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
-        """
+    Parameters
+    ----------
+    dim : int
+        Hidden size of the embeddings
+    divide : float, optional
+        divide positions by this factor, useful for large (or small) numerical ranges, by default 1.0
+    learned_div : bool, optional
+        Whether to learn the division factor, if True, div value initialization is as provided by divide argument, by default False
+    """
+
+    def __init__(self, dim: int, divide: float = 1.0, learned_div: bool = False):
         super().__init__(divide=divide, learned=learned_div)
         self.dim = dim
         inv_freq = 1 / (10000 ** (torch.arange(0.0, dim, 2) / dim))
         self.register_buffer("inv_freq", inv_freq)
 
-    def mod_x(self, x, pos=None, mask=None, **kwargs):
-        """
-        Args:
-            x (torch.tensor): (B,*,L,H)
-            pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1
-            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
-                Defaults to None for no masking
-            **kwargs: ignored. Kept for compatibility.
-            
-        Returns:
-            torch.tensor: x with added sinusoidal embeddings.
+    def mod_x(
+        self,
+        x: torch.Tensor,
+        pos: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Modify X
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            (B,*,L,H)
+        pos : Optional[torch.Tensor], optional
+            (B,*,L) or (B,*,L-x), by default None for computing positions from 0 to L-1
+            If sequence length is smaller than x, will pad tokens on the lefthand side to not have any positional encodings added.
+        mask : Optional[torch.Tensor], optional
+            (B,*,L) or (B,*,L-x), by default None
+            A boolean mask can be used to explicitly indicate which positions should not have positional encodings added.
+            If sequence length is smaller than x, will pad tokens on the lefthand side to have a positional encoding added.
+
+        Returns
+        -------
+        torch.Tensor
+            (B,*,L,H)
         """
         shp = list(x.shape)
         l = shp[-2]
@@ -79,39 +99,57 @@ class Sinusoidal(Base):
 
         if mask is not None:
             assert mask.dtype == torch.bool
-            mask = F.pad(mask, (pos_emb.shape[-2]-mask.shape[-1], 0), value=True)
+            mask = F.pad(mask, (pos_emb.shape[-2] - mask.shape[-1], 0), value=True)
             pos_emb = pos_emb * mask.unsqueeze(-1)
 
         if l != shp[-2]:
-            pos_emb = F.pad(pos_emb, (0, 0, l-shp[-2], 0))
+            pos_emb = F.pad(pos_emb, (0, 0, l - shp[-2], 0))
 
         return x + pos_emb
 
 
 class LearnedVocab(Base):
-    def __init__(self, dim, max_seq_len):
-        """Learned vocab as in Devlin et al. (2018)
-        Supports specifying positions.
-        Only works for discrete positional indices.
+    """Learned vocab as in Devlin et al. (2018)
+    Supports specifying positions.
+    Only works for discrete positional indices.
 
-        Args:
-            dim (int): Hidden size of the embeddings
-            max_seq_len (int): maximum sequence length or vocab size of the learned embeddings
-        """
+    Parameters
+    ----------
+    dim : int
+        Hidden size of the embeddings
+    max_seq_len : int
+        Maximum sequence length or vocab size of the learned embeddings
+    """
+
+    def __init__(self, dim: int, max_seq_len: int):
         super().__init__()
         self.emb = nn.Embedding(max_seq_len, dim)
 
-    def mod_x(self, x, pos=None, mask = None, **kwargs):
-        """
-        Args:
-            x (torch.tensor): (B,*,L,H)
-            pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1
-            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
-                Defaults to None for no masking
-            **kwargs: ignored. Kept for compatibility.
+    def mod_x(
+        self,
+        x: torch.Tensor,
+        pos: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Modify X
 
-        Returns:
-            torch.tensor: x with added learned embeddings.
+        Parameters
+        ----------
+        x : torch.Tensor
+            (B,*,L,H)
+        pos : Optional[torch.Tensor], optional
+            (B,*,L) or (B,*,L-x), by default None for computing positions from 0 to L-1
+            If sequence length is smaller than x, will pad tokens on the lefthand side to not have any positional encodings added.
+        mask : Optional[torch.Tensor], optional
+            (B,*,L) or (B,*,L-x), by default None
+            A boolean mask can be used to explicitly indicate which positions should not have positional encodings added.
+            If sequence length is smaller than x, will pad tokens on the lefthand side to have a positional encoding added.
+
+        Returns
+        -------
+        torch.Tensor
+            (B,*,L,H)
         """
         shp = list(x.shape)
         assert shp[-1] == self.emb.embedding_dim
@@ -121,28 +159,45 @@ class LearnedVocab(Base):
 
         if mask is not None:
             assert mask.dtype == torch.bool
-            mask = F.pad(mask, (pos_emb.shape[-2]-mask.shape[-1], 0), value=True)
+            mask = F.pad(mask, (pos_emb.shape[-2] - mask.shape[-1], 0), value=True)
             pos_emb = pos_emb * mask.unsqueeze(-1)
 
         l = pos_emb.shape[-2]
         if l != shp[-2]:
-            pos_emb = F.pad(pos_emb, (0, 0, shp[-2]-l, 0))
+            pos_emb = F.pad(pos_emb, (0, 0, shp[-2] - l, 0))
 
         return x + pos_emb
 
 
 class LearnedContinuous(Base):
-    def __init__(self, dim, depth=3, norm=False, divide=1.0, learned_div=False):
-        """Learned embeddings with a continuity between absolute positional indices, as learned by a series of linear layers.
-        Supports specifying positions, and division of positional range.
+    """Learned embeddings with a continuity between absolute positional indices, as learned by a series of linear layers.
+    Supports specifying positions, and division of positional range.
 
-        Args:
-            dim (int): Hidden size of the embeddings
-            depth (int, optional): number of hidden layers in the positional embedding network. Defaults to 3
-            norm (bool, optional): Whether to use layernorms in the MLP. Defaults to False
-            divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
-            learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
-        """
+    Parameters
+    ----------
+    dim : int
+        Hidden size of the embeddings
+    depth : int, optional
+        Number of hidden layers in the positional embedding network.
+        Will follow this structure:
+        Linear -> (Norm if norm) { -> Swish -> Linear -> (Norm if norm) } * (depth-1)
+        By default 1, for a linear embedding.
+    norm : bool, optional
+        Whether to use LayerNorms in the embedding net, by default False
+    divide : float, optional
+        divide positions by this factor, useful for large (or small) numerical ranges, by default 1.0
+    learned_div : bool, optional
+        Whether to learn the division factor, if True, div value initialization is as provided by divide argument, by default False
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        depth: int = 1,
+        norm: bool = False,
+        divide: float = 1.0,
+        learned_div: bool = False,
+    ):
         super().__init__(divide=divide, learned=learned_div)
 
         self.mlp = nn.ModuleList([])
@@ -162,17 +217,31 @@ class LearnedContinuous(Base):
                 )
             )
 
-    def mod_x(self, x, pos=None, mask=None, **kwargs):
-        """
-        Args:
-            x (torch.tensor): (B,*,L,H)
-            pos (torch.tensor, optional): (B,*,L). Defaults to None for computing positions from 0 to L-1
-            mask (torch.tensor, optional): (B,*,L). A boolean mask to indicate where positions should not have positional encodings added.
-                Defaults to None for no masking
-            **kwargs: ignored. Kept for compatibility.
-            
-        Returns:
-            torch.tensor: x with added learned embeddings.
+    def mod_x(
+        self,
+        x: torch.Tensor,
+        pos: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Modify X
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            (B,*,L,H)
+        pos : Optional[torch.Tensor], optional
+            (B,*,L) or (B,*,L-x), by default None for computing positions from 0 to L-1
+            If sequence length is smaller than x, will pad tokens on the lefthand side to not have any positional encodings added.
+        mask : Optional[torch.Tensor], optional
+            (B,*,L) or (B,*,L-x), by default None
+            A boolean mask can be used to explicitly indicate which positions should not have positional encodings added.
+            If sequence length is smaller than x, will pad tokens on the lefthand side to have a positional encoding added.
+
+        Returns
+        -------
+        torch.Tensor
+            (B,*,L,H)
         """
         shp = list(x.shape)
 
@@ -184,30 +253,41 @@ class LearnedContinuous(Base):
 
         if mask is not None:
             assert mask.dtype == torch.bool
-            mask = F.pad(mask, (pos_emb.shape[-2]-mask.shape[-1], 0), value=True)
+            mask = F.pad(mask, (pos_emb.shape[-2] - mask.shape[-1], 0), value=True)
             pos_emb = pos_emb * mask.unsqueeze(-1)
 
         l = pos_emb.shape[-2]
         if l != shp[-2]:
-            pos_emb = F.pad(pos_emb, (0, 0, shp[-2]-l, 0))
+            pos_emb = F.pad(pos_emb, (0, 0, shp[-2] - l, 0))
 
         return x + pos_emb
 
 
 class Rotary(Base):
-    def __init__(self, head_dim, n_dims=None, divide=1.0, learned_div=False):
-        """Rotary embedding as in RoFormer / RoPE
-        Supports specifying positions and division of positional range.
+    """Rotary embedding as in RoFormer / RoPE
+    Supports specifying positions and division of positional range.
 
-        Args:
-            head_dim (int): Hidden dimensions per head
-            n_dims (int, optional):
-                number of dimensions (per head) to apply rotations on.
-                Can be used to control how strong the positional bias should be.
-                Defaults to None to use all dims
-            divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
-            learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
-        """
+    Parameters
+    ----------
+    head_dim : int
+        Hidden dimensions per head
+    n_dims : Optional[int], optional
+        number of dimensions (per head) to apply rotations on.
+            Can be used to control how strong the positional bias should be.
+            By default None to use all dims.
+    divide : float, optional
+        divide positions by this factor, useful for large (or small) numerical ranges, by default 1.0
+    learned_div : bool, optional
+        Whether to learn the division factor, if True, div value initialization is as provided by divide argument, by default False
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        n_dims: Optional[int] = None,
+        divide: float = 1.0,
+        learned_div: bool = False,
+    ):
         super().__init__(divide=divide, learned=learned_div)
 
         thetas = 1.0 / (10000 ** (torch.arange(0, head_dim, 2).float() / head_dim))
@@ -218,32 +298,42 @@ class Rotary(Base):
 
     def mod_qkv(
         self,
-        q,
-        k,
-        v,
-        pos_q_k=None,
-        pos_q=None,
-        pos_k=None,
-        self_attn_mode=True,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pos_q_k: Optional[torch.Tensor] = None,
+        pos_q: Optional[torch.Tensor] = None,
+        pos_k: Optional[torch.Tensor] = None,
+        self_attn_mode: bool = True,
         **kwargs,
-    ):
-        """
-        Args:
-            q (torch.tensor): (B,*,L1,NH,H)
-            k (torch.tensor): (B,*,L2,NH,H)
-            v (torch.tensor): (B,*,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B,*,L). Positions of q and k in self attention mode. Requires L1 = L2.
-                Defaults to None for computing positions from 0 to L-1
-            pos_q (torch.tensor, optional): (B,*,L1). Positions of q in cross attention mode.
-                Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B,*,L2). Positions of k in cross attention mode.
-                Defaults to None for computing positions from 0 to L2-1
-            self_attn_mode (bool, optional): Whether to use the same positions for q and k (pos_q_k),
-                or use different positions for each (pos_q) and (pos_k).
-                Defaults to True.
-            **kwargs: ignored. Kept for compatibility.
-        Returns:
-            q, k, v (all torch.tensor)
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Modify Q, K and V
+
+        Parameters
+        ----------
+        q : torch.Tensor
+            (B, *, L1, NH, H)
+        k : torch.Tensor
+            (B, *, L2, NH, H)
+        v : torch.Tensor
+            (B, *, L2, NH, H)
+        pos_q_k : Optional[torch.Tensor], optional
+            (B, *, L). Positions of q and k in self attention mode. Requires L1 = L2
+            By default None for computing positions from 0 to L-1
+        pos_q : Optional[torch.Tensor], optional
+            (B, *, L1). Positions of q in cross attention mode
+            By default None for computing positions from 0 to L1-1
+        pos_k : Optional[torch.Tensor], optional
+            (B, *, L2). Positions of k in cross attention mode
+            By default None for computing positions from 0 to L2-1
+        self_attn_mode : bool, optional
+            Whether to use the same positions for q and k (pos_q_k) or use different positions for each (pos_q) and (pos_k)
+            by default True
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            q, k, v [(B, *, L1, NH, H), (B, *, L2, NH, H), (B, *, L2, NH, H)]
         """
         if self_attn_mode:
             assert q.shape[-3] == k.shape[-3]
@@ -252,7 +342,9 @@ class Rotary(Base):
 
             l_sin, l_q = sin.shape[-3], q.shape[-3]
             if l_sin != l_q:
-                sin, cos = map(lambda t: F.pad(t, (0, 0, 0, 0, l_q-l_sin, 0), (sin, cos)))
+                sin, cos = map(
+                    lambda t: F.pad(t, (0, 0, 0, 0, l_q - l_sin, 0), (sin, cos))
+                )
 
             q = q * cos.to(q) + self.rotate_every_two(q) * sin.to(q)
             k = k * cos.to(k) + self.rotate_every_two(k) * sin.to(k)
@@ -264,10 +356,14 @@ class Rotary(Base):
 
             l_sin, l_q = sin_q.shape[-3], q.shape[-3]
             if l_sin != l_q:
-                sin_q, cos_q = map(lambda t: F.pad(t, (0, 0, 0, 0, l_q-l_sin, 0), (sin_q, cos_q)))
+                sin_q, cos_q = map(
+                    lambda t: F.pad(t, (0, 0, 0, 0, l_q - l_sin, 0), (sin_q, cos_q))
+                )
             l_sin, l_k = sin_k.shape[-3], k.shape[-3]
             if l_sin != l_k:
-                sin_k, cos_k = map(lambda t: F.pad(t, (0, 0, 0, 0, l_k-l_sin, 0), (sin_k, cos_k)))
+                sin_k, cos_k = map(
+                    lambda t: F.pad(t, (0, 0, 0, 0, l_k - l_sin, 0), (sin_k, cos_k))
+                )
 
             q = q * cos_q.to(q) + self.rotate_every_two(q) * sin_q.to(q)
             k = k * cos_k.to(k) + self.rotate_every_two(k) * sin_k.to(k)
@@ -295,26 +391,33 @@ class Rotary(Base):
 
 
 class ALiBi(Base):
+    """Attention with linear biases as in Press et al. 2022
+    Supports specifying positions, division of positional range, using only a fraction of the heads, and asymmetric bias for bidirectional cases.
+
+    Parameters
+    ----------
+    n_heads : int
+        Number of heads
+    use_n_heads : bool, optional
+        Number of heads to use. Can be used to control how strong the positional bias should be, by default None to use all heads
+    asymmetric : bool, optional
+        Whether to use assymetric positional biases to differentiate between negative or positive relative positions.
+        Implemented according to solution #3 proposed here https://github.com/ofirpress/attention_with_linear_biases/issues/5.
+        By default False
+    divide : float, optional
+        divide positions by this factor, useful for large (or small) numerical ranges, by default 1.0
+    learned_div : bool, optional
+        Whether to learn the division factor, if True, div value initialization is as provided by divide argument, by default False
+    """
+
     def __init__(
-        self, n_heads, use_n_heads=None, asymmetric=False, divide=1.0, learned_div=False
+        self,
+        n_heads: int,
+        use_n_heads: bool = None,
+        asymmetric: bool = False,
+        divide: float = 1.0,
+        learned_div: bool = False,
     ):
-        """Attention with linear biases as in Press et al. 2022
-        Supports specifying positions, division of positional range, using only a fraction of the heads, and asymmetric bias for bidirectional cases.
-
-
-        Args:
-            n_heads (int): Number of heads
-            use_n_heads (int, optional):
-                Number of heads to use
-                Can be used to control how strong the positional bias should be.
-                Defaults to None to use all heads
-            assymetric (bool, optional):
-                Whether to use assymetric positional biases to differentiate between negative or positive relative positions.
-                Implemented according to solution 3 proposed here https://github.com/ofirpress/attention_with_linear_biases/issues/5.
-                Defaults to False.
-            divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
-            learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
-        """
         super().__init__(divide=divide, learned=learned_div)
 
         self.asymmetric = asymmetric
@@ -332,26 +435,46 @@ class ALiBi(Base):
 
         self.div = divide
 
-    def mod_mask(self, mask, q, k, v, pos_q_k=None, pos_q=None, pos_k=None, **kwargs):
-        """
-        Args:
-            mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
-            q (torch.tensor): (B,*,L1,NH,H)
-            k (torch.tensor): (B,*,L2,NH,H)
-            v (torch.tensor): (B,*,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B, *, L). Positions of q and k in self attention mode. Requires L1 = L2 =L.
-                Defaults to None for computing positions from 0 to L-1.
-            pos_q (torch.tensor, optional): (B, *, L) eg (B, L1). Positions of q in cross attention mode.
-                Ignored if pos_q_k is specified
-                Defaults to None for computing positions from 0 to L1-1.
-            pos_k (torch.tensor, optional): (B, *, L) eg (B, L2). Positions of k in cross attention mode.
-                Ignored if pos_q_k is specified
-                Defaults to None for computing positions from 0 to L2-1.
-            **kwargs: ignored. Kept for compatibility.
-        Returns:
-            mask (torch.tensor): (B, *, NH, L1, L2)
-        """
+    def mod_mask(
+        self,
+        mask: Optional[torch.Tensor],
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pos_q_k: Optional[torch.Tensor] = None,
+        pos_q: Optional[torch.Tensor] = None,
+        pos_k: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Modify mask
 
+        Parameters
+        ----------
+        mask : Optional[torch.Tensor]
+            (B, *, NH, L1, L2), can pass None for no pre-existing mask.
+        q : torch.Tensor
+            (B, *, L1, NH, H)
+        k : torch.Tensor
+            (B, *, L2, NH, H)
+        v : torch.Tensor
+            (B, *, L2, NH, H)
+        pos_q_k : Optional[torch.Tensor], optional
+            (B, *, L). Positions of q and k in self attention mode. Requires L1 = L2
+            By default None for using pos_q and pos_k instead
+        pos_q : Optional[torch.Tensor], optional
+            (B, *, L1). Positions of q in cross attention mode
+            Ignored if pos_q_k is specified
+            By default None for computing positions from 0 to L1-1
+        pos_k : Optional[torch.Tensor], optional
+            (B, *, L2). Positions of k in cross attention mode
+            Ignored if pos_q_k is specified
+            By default None for computing positions from 0 to L2-1
+
+        Returns
+        -------
+        torch.Tensor
+            (B, *, NH, L1, L2)
+        """
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
 
@@ -366,10 +489,11 @@ class ALiBi(Base):
             bias = self.asymmetric_bias(bias)
         bias = torch.abs(bias)
 
-        l1, l2 = q.shape[-3], k.shape[-3]
-        mask_l1, mask_l2 = mask.shape[-2], mask.shape[-1]
-        if (l1 != mask_l1) or (l2 != mask_l2):
-            mask = F.pad(mask, (l2-mask_l2, 0, l1-mask_l1, 0))
+        if mask is not None:
+            l1, l2 = q.shape[-3], k.shape[-3]
+            mask_l1, mask_l2 = mask.shape[-2], mask.shape[-1]
+            if (l1 != mask_l1) or (l2 != mask_l2):
+                mask = F.pad(mask, (l2 - mask_l2, 0, l1 - mask_l1, 0))
 
         return (0 if mask is None else mask) - bias
 
@@ -399,40 +523,55 @@ class ALiBi(Base):
 
 
 class DPB(Base):
+    """Dynamic positional bias.
+    Computes a bias to every element of the attention matrix based on their relative position via a parameterized MLP
+    Described in https://arxiv.org/abs/2108.00154, https://arxiv.org/abs/2111.09883,
+    https://github.com/lucidrains/x-transformers#dynamic-positional-bias
+    Supports specifying positions and division of positional range
+
+    Parameters
+    ----------
+    dim : int
+        number of hidden dimensions of the MLP
+    n_heads : int
+        Number of heads in the model
+    depth : int, optional
+        Number of hidden layers in the positional embedding network.
+        Will follow this structure:
+        Linear -> (Norm if norm) { -> Swish -> Linear -> (Norm if norm) } * (depth-1)
+        By default 1, for a linear embedding.
+    norm : bool, optional
+        Whether to use LayerNorms in the embedding net, by default False
+    divide : float, optional
+        divide positions by this factor, useful for large (or small) numerical ranges, by default 1.0
+    learned_div : bool, optional
+        Whether to learn the division factor, if True, div value initialization is as provided by divide argument, by default False
+    """
+
     def __init__(
-        self, dim, n_heads, depth=3, norm=False, divide=1.0, learned_div=False
+        self,
+        dim: int,
+        n_heads: int,
+        depth: int = 1,
+        norm: bool = False,
+        divide: float = 1.0,
+        learned_div: bool = False,
     ):
-        """Dynamic positional bias.
-        Computes a bias to every element of the attention matrix based on their relative position via a parameterized MLP
-        Described in https://arxiv.org/abs/2108.00154, https://arxiv.org/abs/2111.09883,
-        https://github.com/lucidrains/x-transformers#dynamic-positional-bias
-        Supports specifying positions and division of positional range
-
-
-        Args:
-            dim (int): number of hidden dimensions of the MLP
-            n_heads (int): Number of heads in the model
-            depth (int, optional): number of hidden layers in the positional embedding network. Defaults to 3
-            norm (bool, optional): Whether to use layernorms in the MLP. Defaults to False
-            divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
-            learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
-        """
         super().__init__(divide=divide, learned=learned_div)
         self.mlp = nn.ModuleList([])
         self.mlp.append(
             nn.Sequential(
                 nn.Linear(1, dim),
                 nn.LayerNorm(dim) if norm else nn.Identity(),
-                nn.SiLU(),
             )
         )
 
         for _ in range(depth - 1):
             self.mlp.append(
                 nn.Sequential(
+                    nn.SiLU(),
                     nn.Linear(dim, dim),
                     nn.LayerNorm(dim) if norm else nn.Identity(),
-                    nn.SiLU(),
                 )
             )
 
@@ -440,22 +579,45 @@ class DPB(Base):
 
         self.div = divide
 
-    def mod_mask(self, mask, q, k, v, pos_q_k=None, pos_q=None, pos_k=None, **kwargs):
-        """
-        Args:
-            mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
-            q (torch.tensor): (B,*,L1,NH,H)
-            k (torch.tensor): (B,*,L2,NH,H)
-            v (torch.tensor): (B,*,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B, *,L). Positions of q and k in self attention mode. Requires L1 = L2 = L.
-                Defaults to None for computing positions from 0 to L-1
-            pos_q (torch.tensor, optional): (B, *,L1). Positions of q in cross attention mode.
-                Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B, *,L2). Positions of k in cross attention mode.
-                Defaults to None for computing positions from 0 to L2-1
-            **kwargs: ignored. Kept for compatibility.
-        Returns:
-            mask (torch.tensor): (B, *, NH, L1, L2)
+    def mod_mask(
+        self,
+        mask: Optional[torch.Tensor],
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pos_q_k: Optional[torch.Tensor] = None,
+        pos_q: Optional[torch.Tensor] = None,
+        pos_k: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Modify mask
+
+        Parameters
+        ----------
+        mask : Optional[torch.Tensor]
+            (B, *, NH, L1, L2), can pass None for no pre-existing mask.
+        q : torch.Tensor
+            (B, *, L1, NH, H)
+        k : torch.Tensor
+            (B, *, L2, NH, H)
+        v : torch.Tensor
+            (B, *, L2, NH, H)
+        pos_q_k : Optional[torch.Tensor], optional
+            (B, *, L). Positions of q and k in self attention mode. Requires L1 = L2
+            By default None for using pos_q and pos_k instead
+        pos_q : Optional[torch.Tensor], optional
+            (B, *, L1). Positions of q in cross attention mode
+            Ignored if pos_q_k is specified
+            By default None for computing positions from 0 to L1-1
+        pos_k : Optional[torch.Tensor], optional
+            (B, *, L2). Positions of k in cross attention mode
+            Ignored if pos_q_k is specified
+            By default None for computing positions from 0 to L2-1
+
+        Returns
+        -------
+        torch.Tensor
+            (B, *, NH, L1, L2)
         """
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
@@ -471,25 +633,34 @@ class DPB(Base):
             bias = layer(bias)
         bias = bias.transpose(-1, -2).transpose(-2, -3).to(q)
 
-        l1, l2 = q.shape[-3], k.shape[-3]
-        mask_l1, mask_l2 = mask.shape[-2], mask.shape[-1]
-        if (l1 != mask_l1) or (l2 != mask_l2):
-            mask = F.pad(mask, (l2-mask_l2, 0, l1-mask_l1, 0))
+        if mask is not None:
+            l1, l2 = q.shape[-3], k.shape[-3]
+            mask_l1, mask_l2 = mask.shape[-2], mask.shape[-1]
+            if (l1 != mask_l1) or (l2 != mask_l2):
+                mask = F.pad(mask, (l2 - mask_l2, 0, l1 - mask_l1, 0))
 
         return (0 if mask is None else mask) - bias
 
 
 class XL(Base):
-    def __init__(self, dim, n_heads, divide=1, learned_div=False):
-        """Relative positional biases as in Transformer-XL (Dai et al 2019)
-        Supports specifying positions and division of positional range
+    """Relative positional biases as in Transformer-XL (Dai et al 2019)
+    Supports specifying positions and division of positional range
 
-        Args:
-            dim (int): number of hidden of x (total, not per head)
-            n_heads (int): Number of heads in the model
-            divide (float, optional): divide positions by this factor, useful for large (or small) numerical ranges. Defaults to 1.0.
-            learned_div (bool, optional): Whether to learn the division factor. Defaults to False.
-        """
+    Parameters
+    ----------
+    dim : int
+        number of hidden of x (total, not per head)
+    n_heads : int
+        Number of heads in the model
+    divide : float, optional
+        divide positions by this factor, useful for large (or small) numerical ranges, by default 1.0
+    learned_div : bool, optional
+        Whether to learn the division factor, if True, div value initialization is as provided by divide argument, by default False
+    """
+
+    def __init__(
+        self, dim: int, n_heads: int, divide: float = 1.0, learned_div: bool = False
+    ):
         super().__init__(divide=divide, learned=learned_div)
         self.embed_lin = nn.Linear(dim, dim)
         self.bias_r_w = self._init_bias(
@@ -504,33 +675,67 @@ class XL(Base):
         self.register_buffer("inv_freq", inv_freq)
         self.div = divide
 
-    def mod_qkv(self, q, k, v, **kwargs):
+    def mod_qkv(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, **kwargs
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Args:
-            q (torch.tensor): (B,*,L1,NH,H)
-            k (torch.tensor): (B,*,L2,NH,H)
-            v (torch.tensor): (B,*,L2,NH,H)
-        Returns:
-            q, k, v (all torch.tensor)
+        Modify Q, K and V
+
+        Parameters
+        ----------
+        q : torch.Tensor
+            (B, *, L1, NH, H)
+        k : torch.Tensor
+            (B, *, L2, NH, H)
+        v : torch.Tensor
+            (B, *, L2, NH, H)
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            q, k, v [(B, *, L1, NH, H), (B, *, L2, NH, H), (B, *, L2, NH, H)]
         """
         return q + self.bias_r_w, k, v
 
-    def mod_mask(self, mask, q, k, v, pos_q_k=None, pos_q=None, pos_k=None, **kwargs):
-        """
-        Args:
-            mask (torch.tensor): B, *, NH, L1, L2, optional, eg B, NH, L1, L2, or for multi-dim: B, S, NH, L1, L2
-            q (torch.tensor): (B,*,L1,NH,H)
-            k (torch.tensor): (B,*,L2,NH,H)
-            v (torch.tensor): (B,*,L2,NH,H)
-            pos_q_k (torch.tensor, optional): (B, *, L). Positions of q and k in self attention mode. Requires L1 = L2 = L.
-                Defaults to None for computing positions from 0 to L-1.
-            pos_q (torch.tensor, optional): (B, *, L1). Positions of q in cross attention mode.
-                Defaults to None for computing positions from 0 to L1-1
-            pos_k (torch.tensor, optional): (B, *, L2). Positions of k in cross attention mode.
-                Defaults to None for computing positions from 0 to L2-1
-            **kwargs: ignored. Kept for compatibility.
-        Returns:
-            mask (torch.tensor): (B, *, NH, L1, L2)
+    def mod_mask(
+        self,
+        mask: Optional[torch.Tensor],
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        pos_q_k: Optional[torch.Tensor] = None,
+        pos_q: Optional[torch.Tensor] = None,
+        pos_k: Optional[torch.Tensor] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Modify mask
+
+        Parameters
+        ----------
+        mask : Optional[torch.Tensor]
+            (B, *, NH, L1, L2), can pass None for no pre-existing mask.
+        q : torch.Tensor
+            (B, *, L1, NH, H)
+        k : torch.Tensor
+            (B, *, L2, NH, H)
+        v : torch.Tensor
+            (B, *, L2, NH, H)
+        pos_q_k : Optional[torch.Tensor], optional
+            (B, *, L). Positions of q and k in self attention mode. Requires L1 = L2
+            By default None for using pos_q and pos_k instead
+        pos_q : Optional[torch.Tensor], optional
+            (B, *, L1). Positions of q in cross attention mode
+            Ignored if pos_q_k is specified
+            By default None for computing positions from 0 to L1-1
+        pos_k : Optional[torch.Tensor], optional
+            (B, *, L2). Positions of k in cross attention mode
+            Ignored if pos_q_k is specified
+            By default None for computing positions from 0 to L2-1
+
+        Returns
+        -------
+        torch.Tensor
+            (B, *, NH, L1, L2)
         """
         if pos_q_k is not None:
             pos_q = pos_k = pos_q_k
@@ -557,10 +762,17 @@ class XL(Base):
         l1, l2 = q.shape[-3], k.shape[-3]
         r_l1, r_l2 = r.shape[-4], r.shape[-3]
         if (l1 != r_l1) or (l2 != r_l2):
-            r = F.pad(r, (0, 0, 0, 0, l2-r_l2, 0, l1-r_l1, 0))
+            r = F.pad(r, (0, 0, 0, 0, l2 - r_l2, 0, l1 - r_l1, 0))
 
         q_r = q + self.bias_r_w
         BD = einsum(q_r, r, "... q n h, ... q k n h -> ... n q k")
+
+        if mask is not None:
+            l1, l2 = q.shape[-3], k.shape[-3]
+            mask_l1, mask_l2 = mask.shape[-2], mask.shape[-1]
+            if (l1 != mask_l1) or (l2 != mask_l2):
+                mask = F.pad(mask, (l2 - mask_l2, 0, l1 - mask_l1, 0))
+
         return (0 if mask is None else mask) + BD
 
     def _init_bias(self, bias):
