@@ -856,8 +856,33 @@ class Transformer(nn.Module):
 
 
 class TransformerEncoder(Transformer):
-    """TransformerEncoder. Same arguments as Transformer.
-    Only difference is causal=False is automatically decided in forward pass
+    """Transformer Encoder network chaining multiple transformer layers
+    Equal to Transformer, only difference is that Causal = False is automatically decided in forward pass
+
+    Parameters
+    ----------
+    depth : int
+        number of transformer blocks to use
+    dim : int
+        input and output hidden dimension of x
+    nh : int
+        number of heads, dim should be divisible by this number
+    attentiontype : Literal[&quot;vanilla&quot;, &quot;random&quot;, &quot;window&quot;], optional
+        attention operator, by default "vanilla"
+    attention_args : dict, optional
+        args passed to the attention operator init, by default {}
+    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+        positional bias plugin, by default "none"
+    plugin_args : dict, optional
+        arguments passed to positional bias init, by default {}
+    only_apply_plugin_at_first : bool, optional
+        only apply positional bias at the first layer, by default False
+    dropout : float, optional
+        dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
+    glu_ff : bool, optional
+        whether to use gated linear feedforward network, by default True
+    activation : Literal["relu", "gelu", "swish"], optional
+        activation, by default "swish"
     """
 
     def __init__(self, *args, **kwargs):
@@ -876,8 +901,33 @@ class TransformerEncoder(Transformer):
 
 
 class TransformerDecoder(Transformer):
-    """TransformerDecoder. Same arguments as Transformer.
-    Only difference is causal=True is automatically decided in forward pass
+    """Transformer Decoder network chaining multiple transformer layers
+    Equal to Transformer, only difference is that Causal = True is automatically decided in forward pass
+
+    Parameters
+    ----------
+    depth : int
+        number of transformer blocks to use
+    dim : int
+        input and output hidden dimension of x
+    nh : int
+        number of heads, dim should be divisible by this number
+    attentiontype : Literal[&quot;vanilla&quot;, &quot;random&quot;, &quot;window&quot;], optional
+        attention operator, by default "vanilla"
+    attention_args : dict, optional
+        args passed to the attention operator init, by default {}
+    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+        positional bias plugin, by default "none"
+    plugin_args : dict, optional
+        arguments passed to positional bias init, by default {}
+    only_apply_plugin_at_first : bool, optional
+        only apply positional bias at the first layer, by default False
+    dropout : float, optional
+        dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
+    glu_ff : bool, optional
+        whether to use gated linear feedforward network, by default True
+    activation : Literal["relu", "gelu", "swish"], optional
+        activation, by default "swish"
     """
 
     def __init__(self, *args, **kwargs):

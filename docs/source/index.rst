@@ -13,9 +13,11 @@ bio-attention documentation
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: API Reference:
 
-   API Reference <bio-attention>
+   Attention/Transformer modules <attention>
+   Embedding modules <embed>
+   Positional bias modules <positional>
 
 
 ..
