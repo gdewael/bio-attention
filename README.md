@@ -59,5 +59,5 @@ This package used the be a 2D sliding window attention package. The current form
 - [ ] Add a warning if non-increasing positional indices are used with a decoder attention
 - [ ] Add docs clarifying that clf tokens are automatically accounted for if no pos is provided for them
 - [ ] Tests
-- [ ] Typing
+- [x] Typing
 - [ ] Docs

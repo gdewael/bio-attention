@@ -1,0 +1,5 @@
+bio-attention
+nbsphinx
+ipykernel
+myst-parser
+sphinx>=6.1
