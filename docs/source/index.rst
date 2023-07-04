@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-h5torch documentation
+bio-attentio documentation
 ===================================
 
 `GitHub page <https://github.com/gdewael/bio-attention>`_
@@ -14,8 +14,8 @@ h5torch documentation
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
-
-   API Reference <bio-attentin>
+   
+   API Reference <bio-attention>
 
 
 ..

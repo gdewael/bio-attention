@@ -1,4 +1,4 @@
-h5torch package
+bio-attention package
 ===============
 
 .. automodule:: bio-attention.attention

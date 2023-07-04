@@ -5,6 +5,7 @@ Simple implementations of attention modules adapted for the biological data doma
 
 [![PyPi Version](https://img.shields.io/pypi/v/bio-attention.svg)](https://pypi.python.org/pypi/bio-attention/)
 [![GitHub license](https://img.shields.io/github/license/gdewael/bio-attention)](https://github.com/gdewael/bio-attention/blob/main/LICENSE)
+[![Documentation](https://readthedocs.org/projects/bio-attention/badge/?version=latest&style=flat-default)](https://bio-attention.readthedocs.io/en/latest/index.html)
 
 </div>
 
