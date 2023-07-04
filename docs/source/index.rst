@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-bio-attentio documentation
+bio-attention documentation
 ===================================
 
 `GitHub page <https://github.com/gdewael/bio-attention>`_
@@ -14,7 +14,7 @@ bio-attentio documentation
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
-   
+
    API Reference <bio-attention>
 
 
