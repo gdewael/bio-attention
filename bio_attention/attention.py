@@ -479,8 +479,9 @@ class WindowAttention(nn.Module):
 class AttnLayer(nn.Module):
     """Self-attention layer performing
     (1) projection to q, k and v.
-    (2) attention
+    (2) attention.
     (3) collapsing heads back to same shape as x.
+    (4) Final linear project to z.
 
     Parameters
     ----------
