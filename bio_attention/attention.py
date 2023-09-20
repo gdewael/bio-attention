@@ -507,6 +507,7 @@ class AttnLayer(nn.Module):
         self.lin = nn.Linear(dim, 3 * dim)
         self.attn = attn
         self.nh = nh
+        self.to_out = nn.Linear(dim, dim)
 
         self.plugin = plugin if plugin is not None else positional.Base()
 
@@ -582,10 +583,12 @@ class AttnLayer(nn.Module):
 
         mask = self.plugin.mod_mask(mask, q, k, v, **mod_kwargs)
 
-        return rearrange(
-            self.attn(q, k, v, mask=mask, causal=causal),
-            "... n h -> ... (n h)",
-            n=self.nh,
+        return self.to_out(
+            rearrange(
+                self.attn(q, k, v, mask=mask, causal=causal),
+                "... n h -> ... (n h)",
+                n=self.nh,
+            )
         )
 
 
@@ -953,8 +956,8 @@ class Aggregator(nn.Module):
     method : Literal["mean", "max", "cls"], optional
         aggregation method, by default "max"
     """
+
     def __init__(self, method: Literal["mean", "max", "cls"] = "max"):
-        
         super().__init__()
         assert method in ["mean", "max", "cls"]
         self.method = method
