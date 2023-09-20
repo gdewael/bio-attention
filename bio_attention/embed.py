@@ -164,7 +164,7 @@ class ContinuousEmbedding(nn.Module):
             (B, *, L+1, H) if cls = True
         """
         out = self.embedder(x.unsqueeze(-1))
-        out[torch.isnan(x)] = self.mask_embedding
+        out[torch.isnan(x)] = self.mask_embedding.to(out)
         out = self.cls(out)
         return out
 
