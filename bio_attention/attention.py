@@ -510,7 +510,7 @@ class AttnLayer(nn.Module):
         self.nh = nh
         self.to_out = nn.Linear(dim, dim)
 
-        self.plugin = plugin if plugin is not None else positional.Base()
+        self.plugin = plugin
 
     def forward(
         self,
@@ -548,15 +548,6 @@ class AttnLayer(nn.Module):
         torch.Tensor
             (B, *, L, H)
         """
-        use_mask_to_mod_x = False
-        if (mask is not None) and (mask.ndim == x.ndim - 1):
-            assert mask.dtype == torch.bool
-            mask = F.pad(mask, (x.shape[-2] - mask.shape[-1], 0), value=True)
-            use_mask_to_mod_x = True
-
-        x = self.plugin.mod_x(
-            x, pos=pos, mask=(mask if use_mask_to_mod_x else None), **mod_kwargs
-        )
         q, k, v = torch.split(self.lin(x), x.size(-1), dim=-1)
         q, k, v = map(
             lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
@@ -654,7 +645,9 @@ class TransformerLayer(nn.Module):
             act = nn.SiLU()
 
         self.norm = nn.LayerNorm(dim)
-        self.attn = AttnLayer(dim, attn, nh=nh, plugin=plugin)
+
+        self.plugin = plugin if plugin is not None else positional.Base()
+        self.attn = AttnLayer(dim, attn, nh=nh, plugin=self.plugin)
 
         project_in = (
             nn.Sequential(nn.Linear(dim, 4 * dim), act)
@@ -706,6 +699,16 @@ class TransformerLayer(nn.Module):
         torch.Tensor
             (B, *, L, H)
         """
+        use_mask_to_mod_x = False
+        if (mask is not None) and (mask.ndim == x.ndim - 1):
+            assert mask.dtype == torch.bool
+            mask = F.pad(mask, (x.shape[-2] - mask.shape[-1], 0), value=True)
+            use_mask_to_mod_x = True
+
+        x = self.plugin.mod_x(
+            x, pos=pos, mask=(mask if use_mask_to_mod_x else None), **mod_kwargs
+        )
+
         x = self.attn(self.norm(x), pos=pos, mask=mask, causal=causal, **mod_kwargs) + x
         return self.ff(x)
 
