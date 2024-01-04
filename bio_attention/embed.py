@@ -294,7 +294,7 @@ class BinEmbedding(nn.Module):
         diff = x[..., None] - self.bins
         z = diff >= 0 if self.left_closed else diff > 0
         z = torch.cat([z, torch.zeros_like(z)[..., [-1]]], dim=-1)
-        return torch.clamp(z.int().argmin(2) - 1, min=0)
+        return torch.clamp(z.int().argmin(-1) - 1, min=0)
 
 
 class CLS(nn.Module):
