@@ -9,14 +9,12 @@ Simple implementations of attention modules adapted for the biological data doma
 
 </div>
 
-# :construction: THIS CODE IS BEING ACTIVELY DEVELOPED :construction:
-
-Don't look for stability here (yet).
-
 ## Why use this package?
 
 There are already plenty of excellent implementations out there that allow you to test out the countless variants of transformers [[1]](https://github.com/facebookresearch/xformers), [[2]](https://github.com/lucidrains/x-transformers).
 This repository primarily separates itself from the previous in that it contains positional encodings schemes adapted to allow for irregularly-spaced positions in sequences.
+This is useful in, for example: (1) the mass spectral domain (proteomics, metabolomics, ...), where transformers operate on sets of peaks, (2) any kind of (epi)genomic data that measures sites of interests on the genome that are irregularly-spaced (such as WGBS/CpG sites, ATAC-seq/chromatin accessibility, ...).
+Additionally, the attention definitions in this repository are compatible with multi-dimensional data, such as the MSAs used in some protein language models, and AlphaFold.
 
 ## Install
 Since PyTorch is a dependency of `bio-attention`, we recommend [installing PyTorch](https://pytorch.org/get-started/locally/) independently first, as your system may require a specific version (e.g. CUDA drivers).
@@ -28,7 +26,7 @@ pip install bio-attention
 
 ## Note
 
-This package used the be a 2D sliding window attention package. The current formulation of the package does not allow for this type of attention anymore (instead, I recommend to perform axial attention with alternating sliding window attention across one axis and full self-attention across the other). If you want to use 2D sliding window attention, check out the [old version of this repo](https://github.com/gdewael/bio-attention/tree/ac3cb87906a2ff7adf9de393a5d2bbd3bf11eef3).
+This package used to be a 2D sliding window attention package. The current formulation of the package does not allow for this type of attention anymore (instead, I recommend to perform axial attention with alternating sliding window attention across one axis and full self-attention across the other). If you want to use 2D sliding window attention, check out the [old version of this repo](https://github.com/gdewael/bio-attention/tree/ac3cb87906a2ff7adf9de393a5d2bbd3bf11eef3).
 
 ## Usage
 
