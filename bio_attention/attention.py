@@ -82,14 +82,17 @@ class Attention(nn.Module):
         if mask is not None:
             mask = rearrange(mask, "b ... n q k -> (b ...) n q k")  # (B...), NH, L1, L2
 
-        if causal:
-            causal_mask = torch.ones(q.shape[-2], k.shape[-2], dtype=torch.bool)
+        is_causal = False
+        if causal and (mask is not None):
+            causal_mask = torch.ones(q.shape[-2], k.shape[-2], dtype=torch.bool, device=q.device)
             causal_mask = causal_mask.triu(diagonal=0).expand(
                 q.shape[0], q.shape[1], -1, -1
             )
-            mask = (mask if mask is not None else (causal_mask).to(q)).masked_fill(
+            mask = mask.masked_fill(
                 causal_mask, -float("inf")
             )
+        else:
+            is_causal = True
 
         if self.use_context_manager:
             with torch.backends.cuda.sdp_kernel(**self.context_manager):
@@ -100,7 +103,7 @@ class Attention(nn.Module):
                         v,
                         dropout_p=(self.dropout if self.training else 0),
                         attn_mask=mask,
-                        is_causal=False,
+                        is_causal=is_causal,
                     )
                     .permute(0, 2, 1, 3)
                     .view(*q_shape)
@@ -113,7 +116,7 @@ class Attention(nn.Module):
                     v,
                     dropout_p=(self.dropout if self.training else 0),
                     attn_mask=mask,
-                    is_causal=False,
+                    is_causal=is_causal,
                 )
                 .permute(0, 2, 1, 3)
                 .view(*q_shape)
