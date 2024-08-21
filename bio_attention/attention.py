@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import math
 from bio_attention import positional
 from typing import Optional, Literal, Union
-
+from torch.nn.attention import sdpa_kernel, SDPBackend
 
 def compl_mod(m, n):
     return int(n * math.ceil(m / n) - m)
@@ -37,11 +37,14 @@ class Attention(nn.Module):
     ):
         super().__init__()
         self.dropout = dropout
-        self.context_manager = {
-            "enable_math": enable_math,
-            "enable_flash": enable_flash,
-            "enable_mem_efficient": enable_mem_efficient,
-        }
+        self.context_manager = []
+        if enable_math:
+            self.context_manager.append(SDPBackend.MATH)
+        if enable_flash:
+            self.context_manager.append(SDPBackend.FLASH_ATTENTION)
+        if enable_mem_efficient:
+            self.context_manager.append(SDPBackend.EFFICIENT_ATTENTION)
+
         self.use_context_manager = not all(
             [enable_math, enable_flash, enable_mem_efficient]
         )
@@ -95,7 +98,7 @@ class Attention(nn.Module):
             is_causal = True
 
         if self.use_context_manager:
-            with torch.backends.cuda.sdp_kernel(**self.context_manager):
+            with sdpa_kernel(self.context_manager):
                 return (
                     F.scaled_dot_product_attention(
                         q,
