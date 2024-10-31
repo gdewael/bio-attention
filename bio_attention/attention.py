@@ -94,7 +94,7 @@ class Attention(nn.Module):
             mask = mask.masked_fill(
                 causal_mask, -float("inf")
             )
-        else:
+        elif causal:
             is_causal = True
 
         if self.use_context_manager:
