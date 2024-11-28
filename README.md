@@ -53,7 +53,7 @@ This package used to be a 2D sliding window attention package. The current formu
   - [x] Performer
   - [x] Encoder
   - [x] Decoder
-  - [ ] Cross
+  - [x] Cross
   - [x] Support for multi-dim inputs
 - [ ] Add a warning if non-increasing positional indices are used with a decoder attention
 - [ ] Add docs clarifying that clf tokens are automatically accounted for if no pos is provided for them

@@ -10,6 +10,25 @@ from torch.nn.attention import sdpa_kernel, SDPBackend
 def compl_mod(m, n):
     return int(n * math.ceil(m / n) - m)
 
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x, *args, **kwargs):
+        return self.fn(x, *args, **kwargs) + x
+
+
+class GLU(nn.Module):
+    def __init__(self, dim, ff_dim, activation):
+        super().__init__()
+        self.act = activation
+        self.proj = nn.Linear(dim, ff_dim * 2)
+
+    def forward(self, x):
+        x, gate = self.proj(x).chunk(2, dim=-1)
+        return x * self.act(gate)
+
 
 class Attention(nn.Module):
     """Scaled-dot product attention operator.
@@ -516,7 +535,7 @@ class AttnLayer(nn.Module):
         self.nh = nh
         self.to_out = nn.Linear(dim, dim)
 
-        self.plugin = plugin
+        self.plugin = plugin if plugin is not None else positional.Base()
 
     def forward(
         self,
@@ -569,9 +588,13 @@ class AttnLayer(nn.Module):
             if mask.dtype == torch.bool:
                 mask = (~mask).to(q).masked_fill(~mask, -float("inf"))
 
+            diff_k = k.shape[-3] - mask.shape[-1]
+            diff_q = q.shape[-3] - mask.shape[-2]
+            diff_k = (0 if diff_k < 0 else diff_k)
+            diff_q = (0 if diff_q < 0 else diff_q)
             mask = F.pad(
                 mask,
-                (k.shape[-3] - mask.shape[-1], 0, (q.shape[-3] - mask.shape[-2]), 0),
+                (diff_k, 0, diff_q, 0),
                 value=0,
             )
 
@@ -590,24 +613,121 @@ class AttnLayer(nn.Module):
         )
 
 
-class Residual(nn.Module):
-    def __init__(self, fn):
+class CrossAttnLayer(nn.Module):
+    """Cross-attention layer performing
+    (1) projection to q, k and v.
+    (2) attention.
+    (3) collapsing heads back to same shape as x.
+    (4) Final linear project to z.
+
+    Parameters
+    ----------
+    dim : int
+        input and output hidden dimension of x
+    attn : Union[Attention, RandomAttention, WindowAttention]
+        attention operator. Default, random and windowed attention are implemented.
+    nh : int, optional
+        number of heads, dim should be divisible by this number, by default 4
+    plugin : Optional[positional.Base], optional
+        positional bias plugin, Can only be None. Here for API compatibility reasons.
+
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        attn: Union[Attention, RandomAttention, WindowAttention],
+        nh: int = 4,
+        plugin: Optional[positional.Base] = None,
+    ):
         super().__init__()
-        self.fn = fn
+        assert dim % nh == 0, "dim should be divisible by number of heads"
 
-    def forward(self, x, *args, **kwargs):
-        return self.fn(x, *args, **kwargs) + x
+        self.q_lin = nn.Linear(dim, dim)
+        self.kv_lin = nn.Linear(dim, 2 * dim)
+        self.attn = attn
+        self.nh = nh
+        self.to_out = nn.Linear(dim, dim)
 
+        assert plugin is None
+        self.plugin = plugin if plugin is not None else positional.Base()
+        
 
-class GLU(nn.Module):
-    def __init__(self, dim, ff_dim, activation):
-        super().__init__()
-        self.act = activation
-        self.proj = nn.Linear(dim, ff_dim * 2)
+    def forward(
+        self,
+        x: torch.Tensor,
+        context: torch.Tensor,
+        pos: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
+        causal: bool = False,
+        **mod_kwargs,
+    ) -> torch.Tensor:
+        """Forward pass
 
-    def forward(self, x):
-        x, gate = self.proj(x).chunk(2, dim=-1)
-        return x * self.act(gate)
+        Parameters
+        ----------
+        x : torch.Tensor
+            (B, *, L, H)
+        context : torch.Tensor
+            (B, *, L2, H)
+        pos : Optional[torch.Tensor], optional
+            (B, *, L) or (B, *, L-x), by default None
+            If pos has a smaller sequence length than x, it is assumed x has extra tokens added in the beginning of its sequence such as CLS tokens.
+            In this case, there is no position for these tokens. Positional biases will make sure those tokens do not partake in positional encoding.
+        mask : Optional[torch.Tensor], optional
+            By default None, but can be either:
+            (1) (B, * L2) or (B, * L2-x). In this case, expects a boolean mask.
+            This type of mask will be copied to (B, * NH, L, L2) in a way such that no query tokens can attend to key positions indicated by False.
+            This type of mask will extrapolate CLS tokens to not attend on positions indicated with False.
+            (2) (B, * L, L2) or (B, * L-x, L2-x). In this case, can either be floating point or boolean mask.
+            This type of mask will extrapolate CLS token to attend on all tokens.
+            For this type of mask, the same mask is applied over all heads
+            (3) (B, * NH, L, L2) or (B, * NH, L-x, L2-x)
+            Ditto as previous case, but for this type of mask, different biases/masks can be applied per head.
+        causal : bool, optional
+            should be False, only here for API compatibility reasons.
+
+        Returns
+        -------
+        torch.Tensor
+            (B, *, L, H)
+        """
+        assert causal is False
+        assert pos is None
+
+        q = self.q_lin(x)
+        k, v = torch.split(self.kv_lin(context), context.size(-1), dim=-1)
+        q, k, v = map(
+            lambda t: rearrange(t, "... (n h) -> ... n h", n=self.nh), (q, k, v)
+        )  # B, *, L, NH, H
+
+        if mask is not None:
+            if q.ndim - mask.ndim == 2:  # B, *, L2 -> B, *, L, L2
+                mask = repeat(mask, "... l2 -> ... (l) l2", l=q.shape[-3])
+            if q.ndim - mask.ndim == 1:  # B, *, L, L2  -> B, *, NH, L, L2
+                mask = repeat(mask, "... l1 l2 -> ... nh l1 l2", nh=q.shape[-2])
+
+            assert mask.shape[:-3] == q.shape[:-3]
+            if mask.dtype == torch.bool:
+                mask = (~mask).to(q).masked_fill(~mask, -float("inf"))
+
+            diff_k = k.shape[-3] - mask.shape[-1]
+            diff_q = q.shape[-3] - mask.shape[-2]
+            diff_k = (0 if diff_k < 0 else diff_k)
+            diff_q = (0 if diff_q < 0 else diff_q)
+            mask = F.pad(
+                mask,
+                (diff_k, 0, diff_q, 0),
+                value=0,
+            )
+
+        return self.to_out(
+            rearrange(
+                self.attn(q, k, v, mask=mask, causal=False),
+                "... n h -> ... (n h)",
+                n=self.nh,
+            )
+        )
 
 
 class TransformerLayer(nn.Module):
@@ -708,7 +828,9 @@ class TransformerLayer(nn.Module):
         use_mask_to_mod_x = False
         if (mask is not None) and (mask.ndim == x.ndim - 1):
             assert mask.dtype == torch.bool
-            mask = F.pad(mask, (x.shape[-2] - mask.shape[-1], 0), value=True)
+            diff = x.shape[-2] - mask.shape[-1]
+            diff = (0 if diff < 0 else diff)
+            mask = F.pad(mask, (diff, 0), value=True)
             use_mask_to_mod_x = True
 
         x = self.plugin.mod_x(
@@ -716,6 +838,125 @@ class TransformerLayer(nn.Module):
         )
 
         x = self.attn(self.norm(x), pos=pos, mask=mask, causal=causal, **mod_kwargs) + x
+        return self.ff(x)
+
+
+class CrossTransformerLayer(nn.Module):
+    """Cross-attention Transformer Layer.
+    Performs pre-norm, attention, residual around both, then layernorm + feedforward with residual connection wrapped around it.
+
+    Parameters
+    ----------
+    attn : Union[Attention, RandomAttention, WindowAttention]
+        attention operator. Default, random and windowed attention are implemented.
+    dim : int
+        input and output hidden dimension of x
+    nh : int
+        number of heads, dim should be divisible by this number, by default 4
+    plugin : Optional[positional.Base], optional
+        positional bias plugin, for options see the list of implemented biases, by default None
+    dropout : float, optional
+        dropout in feedforward, by default 0.2
+    glu_ff : bool, optional
+        whether to use gated linear feedforward network, by default True
+    activation : Literal["relu", "gelu", "swish"], optional
+        activation, by default "swish"
+    """
+
+    def __init__(
+        self,
+        attn: Union[Attention, RandomAttention, WindowAttention],
+        dim: int,
+        nh: int,
+        plugin: Optional[positional.Base] = None,
+        dropout: float = 0.2,
+        glu_ff: bool = True,
+        activation: Literal["relu", "gelu", "swish"] = "swish",
+    ):
+        super().__init__()
+        if activation.lower() == "relu":
+            act = nn.ReLU()
+        elif activation.lower() == "gelu":
+            act = nn.GELU()
+        elif activation.lower() == "swish":
+            act = nn.SiLU()
+
+        self.norm_1 = nn.LayerNorm(dim)
+        self.plugin = plugin if plugin is not None else positional.Base()
+        self.self_attn = AttnLayer(dim, attn, nh=nh, plugin=self.plugin)
+
+        self.norm_2 = nn.LayerNorm(dim)
+        self.cross_attn = CrossAttnLayer(dim, attn, nh=nh, plugin=None)
+
+        project_in = (
+            nn.Sequential(nn.Linear(dim, 4 * dim), act)
+            if not glu_ff
+            else GLU(dim, 4 * dim, act)
+        )
+        self.ff = Residual(
+            nn.Sequential(
+                nn.LayerNorm(dim),
+                project_in,
+                nn.Dropout(dropout),
+                nn.Linear(4 * dim, dim),
+            )
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        context: torch.Tensor,
+        pos: Optional[torch.Tensor] = None,
+        mask_context: Optional[torch.Tensor] = None,
+        mask_x: Optional[torch.Tensor] = None,
+        causal: bool = False,
+        **mod_kwargs,
+    ) -> torch.Tensor:
+        """Forward pass
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            (B, *, L, H)
+        context : torch.Tensor
+            (B, *, L, H)
+        pos : Optional[torch.Tensor], optional
+            (B, *, L) or (B, *, L-x), by default None
+            If pos has a smaller sequence length than x, it is assumed x has extra tokens added in the beginning of its sequence such as CLS tokens.
+            In this case, there is no position for these tokens. Positional biases will make sure those tokens do not partake in positional encoding.
+        mask : Optional[torch.Tensor], optional
+            By default None, but can be either:
+            (1) (B, * L) or (B, * L-x). In this case, expects a boolean mask.
+            This type of mask will be copied to (B, * NH, L, L) in a way such that no tokens can attend to positions indicated by False.
+            This type of mask will extrapolate CLS tokens to not attend on positions indicated with False.
+            (2) (B, * L, L) or (B, * L-x, L-x). In this case, can either be floating point or boolean mask.
+            This type of mask will extrapolate CLS token to attend on all tokens.
+            For this type of mask, the same mask is applied over all heads
+            (3) (B, * NH, L, L) or (B, * NH, L-x, L-x)
+            Ditto as previous case, but for this type of mask, different biases/masks can be applied per head.
+        causal : bool, optional
+            Perform causal attention, by default False
+
+        Returns
+        -------
+        torch.Tensor
+            (B, *, L, H)
+        """
+        use_mask_to_mod_x = False
+        if (mask_x is not None) and (mask_x.ndim == x.ndim - 1):
+            assert mask_x.dtype == torch.bool
+            diff = x.shape[-2] - mask_x.shape[-1]
+            diff = (0 if diff < 0 else diff)
+            mask_x = F.pad(mask_x, (diff, 0), value=True)
+            use_mask_to_mod_x = True
+
+        x = self.plugin.mod_x(
+            x, pos=pos, mask=(mask_x if use_mask_to_mod_x else None), **mod_kwargs
+        )
+
+        x = self.self_attn(self.norm_1(x), pos=pos, mask=mask_x, causal=causal, **mod_kwargs) + x
+        x = self.cross_attn(self.norm_2(x), context, pos=None, mask=mask_context, causal=False, **mod_kwargs) + x
+
         return self.ff(x)
 
 
@@ -956,6 +1197,203 @@ class TransformerDecoder(Transformer):
         for layer in self.layers:
             x = layer(x, pos=pos, mask=mask, causal=True, **mod_kwargs)
         return x
+
+
+class TransformerSeq2Seq(nn.Module):
+    """Transformer network chaining multiple transformer layers
+
+    Parameters
+    ----------
+    depth : int
+        number of transformer blocks to use
+    dim : int
+        input and output hidden dimension of x
+    nh : int
+        number of heads, dim should be divisible by this number
+    attentiontype : Literal["vanilla", "random", "window"], optional
+        attention operator, by default "vanilla"
+    attention_args : dict, optional
+        args passed to the attention operator init, by default {}
+    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+        positional bias plugin, by default "none"
+    plugin_args : dict, optional
+        arguments passed to positional bias init, by default {}
+    only_apply_plugin_at_first : bool, optional
+        only apply positional bias at the first layer, by default False
+    dropout : float, optional
+        dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
+    glu_ff : bool, optional
+        whether to use gated linear feedforward network, by default True
+    activation : Literal["relu", "gelu", "swish"], optional
+        activation, by default "swish"
+    """
+
+    def __init__(
+        self,
+        enc_depth: int,
+        dec_depth: int,
+        dim: int,
+        nh: int,
+        enc_attentiontype: Literal["vanilla", "random", "window"] = "vanilla",
+        enc_attention_args: dict = {},
+        enc_plugintype: Literal[
+            "none",
+            "sinusoidal",
+            "learned",
+            "learnedcont",
+            "rotary",
+            "ALiBi",
+            "DPB",
+            "XL",
+        ] = "none",
+        enc_plugin_args: dict = {},
+        enc_only_apply_plugin_at_first: bool = False,
+        dec_attentiontype: Literal["vanilla", "random", "window"] = "vanilla",
+        dec_attention_args: dict = {},
+        dec_plugintype: Literal[
+            "none",
+            "sinusoidal",
+            "learned",
+            "learnedcont",
+            "rotary",
+            "ALiBi",
+            "DPB",
+            "XL",
+        ] = "none",
+        dec_plugin_args: dict = {},
+        dec_only_apply_plugin_at_first: bool = False,
+        dropout: float = 0.2,
+        glu_ff: bool = True,
+        activation: Literal["relu", "gelu", "swish"] = "swish",
+    ):
+        super().__init__()
+
+        self.transformer_encoder = Transformer(
+            depth=enc_depth,
+            dim=dim,
+            nh = nh,
+            attentiontype=enc_attentiontype,
+            attention_args=enc_attention_args,
+            plugintype=enc_plugintype,
+            plugin_args=enc_plugin_args,
+            only_apply_plugin_at_first=enc_only_apply_plugin_at_first,
+            dropout=dropout,
+            glu_ff=glu_ff,
+            activation=activation,
+        )
+
+        if dec_attentiontype == "vanilla":
+            attn_op = Attention(**dec_attention_args)
+        elif dec_attentiontype == "random":
+            attn_op = RandomAttention(**dec_attention_args)
+        elif dec_attentiontype == "window":
+            attn_op = WindowAttention(**dec_attention_args)
+
+        if dec_plugintype == "none":
+            plugin = positional.Base()
+        elif dec_plugintype == "sinusoidal":
+            plugin = positional.Sinusoidal(**dec_plugin_args)
+        elif dec_plugintype == "learned":
+            plugin = positional.LearnedVocab(**dec_plugin_args)
+        elif dec_plugintype == "learnedcont":
+            plugin = positional.LearnedContinuous(**dec_plugin_args)
+        elif dec_plugintype == "rotary":
+            plugin = positional.Rotary(**dec_plugin_args)
+        elif dec_plugintype == "ALiBi":
+            plugin = positional.ALiBi(**dec_plugin_args)
+        elif dec_plugintype == "DPB":
+            plugin = positional.DPB(**dec_plugin_args)
+        elif dec_plugintype == "XL":
+            plugin = positional.XL(**dec_plugin_args)
+
+        layers = []
+        layers.append(
+            TransformerLayer(
+                attn_op,
+                dim,
+                nh,
+                plugin=plugin,
+                dropout=dropout,
+                glu_ff=glu_ff,
+                activation=activation,
+            )
+        )
+
+        for _ in range(dec_depth - 1):
+            layers.append(
+                CrossTransformerLayer(
+                    attn_op,
+                    dim,
+                    nh,
+                    plugin=(None if dec_only_apply_plugin_at_first else plugin),
+                    dropout=dropout,
+                    glu_ff=glu_ff,
+                    activation=activation,
+                )
+            )
+
+        self.transformer_decoder = nn.ModuleList(layers)
+
+    def forward(
+        self,
+        x_enc: torch.Tensor,
+        x_dec : torch.Tensor,
+        pos_enc: Optional[torch.Tensor] = None,
+        pos_dec : Optional[torch.Tensor] = None,
+        mask_enc: Optional[torch.Tensor] = None,
+        mask_dec: Optional[torch.Tensor] = None,
+        causal_enc: bool = False,
+        causal_dec: bool = True,
+        **mod_kwargs,
+    ) -> torch.Tensor:
+        """Forward pass
+
+        Parameters
+        ----------
+        x_{enc,dec} : torch.Tensor
+            (B, *, L, H)
+        pos_{enc,dec} : Optional[torch.Tensor], optional
+            (B, *, L) or (B, *, L-x), by default None
+            If pos has a smaller sequence length than x, it is assumed x has extra tokens added in the beginning of its sequence such as CLS tokens.
+            In this case, there is no position for these tokens. Positional biases will make sure those tokens do not partake in positional encoding.
+        mask_{enc,dec} : Optional[torch.Tensor], optional
+            By default None, but can be either:
+            (1) (B, * L) or (B, * L-x). In this case, expects a boolean mask.
+            This type of mask will be copied to (B, * NH, L, L) in a way such that no tokens can attend to positions indicated by False.
+            This type of mask will extrapolate CLS tokens to not attend on positions indicated with False.
+            (2) (B, * L, L) or (B, * L-x, L-x). In this case, can either be floating point or boolean mask.
+            This type of mask will extrapolate CLS token to attend on all tokens.
+            For this type of mask, the same mask is applied over all heads
+            (3) (B, * NH, L, L) or (B, * NH, L-x, L-x)
+            Ditto as previous case, but for this type of mask, different biases/masks can be applied per head.
+        causal_{enc,dec} : bool, optional
+            Perform causal attention, by default False
+
+        Returns
+        -------
+        torch.Tensor
+            (B, *, L, H)
+        """
+        encoder_output = self.transformer_encoder(
+            x_enc,
+            pos=pos_enc,
+            mask=mask_enc,
+            causal=causal_enc,
+            **mod_kwargs,
+        )
+        
+        for layer in self.transformer_decoder:
+            x_dec = layer(
+                x_dec,
+                context=encoder_output,
+                pos=pos_dec,
+                mask_x=mask_dec,
+                mask_context=mask_enc,
+                causal=causal_dec,
+                **mod_kwargs)
+
+
+        return x_dec
 
 
 class Aggregator(nn.Module):
