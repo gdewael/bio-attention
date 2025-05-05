@@ -4,7 +4,7 @@ from einops import rearrange, repeat
 import torch.nn.functional as F
 import math
 from bio_attention import positional
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, List
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 def compl_mod(m, n):
@@ -600,9 +600,9 @@ class AttnLayer(nn.Module):
 
         mod_kwargs |= {"pos_q_k": pos}
 
-        q, k, v = self.plugin.mod_qkv(q, k, v, **mod_kwargs)
-
-        mask = self.plugin.mod_mask(mask, q, k, v, **mod_kwargs)
+        for plug in self.plugin:
+            q, k, v = plug.mod_qkv(q, k, v, **mod_kwargs)
+            mask = plug.mod_mask(mask, q, k, v, **mod_kwargs)
 
         return self.to_out(
             rearrange(
@@ -773,6 +773,9 @@ class TransformerLayer(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
         self.plugin = plugin if plugin is not None else positional.Base()
+        if not isinstance(self.plugin, list):
+            self.plugin = [self.plugin]
+
         self.attn = AttnLayer(dim, attn, nh=nh, plugin=self.plugin)
 
         project_in = (
@@ -833,9 +836,10 @@ class TransformerLayer(nn.Module):
             mask = F.pad(mask, (diff, 0), value=True)
             use_mask_to_mod_x = True
 
-        x = self.plugin.mod_x(
-            x, pos=pos, mask=(mask if use_mask_to_mod_x else None), **mod_kwargs
-        )
+        for plug in self.plugin:
+            x = plug.mod_x(
+                x, pos=pos, mask=(mask if use_mask_to_mod_x else None), **mod_kwargs
+            )
 
         x = self.attn(self.norm(x), pos=pos, mask=mask, causal=causal, **mod_kwargs) + x
         return self.ff(x)
@@ -883,6 +887,9 @@ class CrossTransformerLayer(nn.Module):
 
         self.norm_1 = nn.LayerNorm(dim)
         self.plugin = plugin if plugin is not None else positional.Base()
+        if not isinstance(self.plugin, list):
+            self.plugin = [self.plugin]
+        
         self.self_attn = AttnLayer(dim, attn, nh=nh, plugin=self.plugin)
 
         self.norm_2 = nn.LayerNorm(dim)
@@ -950,14 +957,26 @@ class CrossTransformerLayer(nn.Module):
             mask_x = F.pad(mask_x, (diff, 0), value=True)
             use_mask_to_mod_x = True
 
-        x = self.plugin.mod_x(
-            x, pos=pos, mask=(mask_x if use_mask_to_mod_x else None), **mod_kwargs
-        )
+        for plug in self.plugin:
+            x = plug.mod_x(
+                x, pos=pos, mask=(mask_x if use_mask_to_mod_x else None), **mod_kwargs
+            )
 
         x = self.self_attn(self.norm_1(x), pos=pos, mask=mask_x, causal=causal, **mod_kwargs) + x
         x = self.cross_attn(self.norm_2(x), context, pos=None, mask=mask_context, causal=False, **mod_kwargs) + x
 
         return self.ff(x)
+
+EncodingType = Literal[
+    "none",
+    "sinusoidal",
+    "learned",
+    "learnedcont",
+    "rotary",
+    "ALiBi",
+    "DPB",
+    "XL",
+]
 
 
 class Transformer(nn.Module):
@@ -975,9 +994,9 @@ class Transformer(nn.Module):
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
-    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+    plugintype : Union[EncodingType, List[EncodingType]], optional
         positional bias plugin, by default "none"
-    plugin_args : dict, optional
+    plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
     only_apply_plugin_at_first : bool, optional
         only apply positional bias at the first layer, by default False
@@ -996,17 +1015,8 @@ class Transformer(nn.Module):
         nh: int,
         attentiontype: Literal["vanilla", "random", "window"] = "vanilla",
         attention_args: dict = {},
-        plugintype: Literal[
-            "none",
-            "sinusoidal",
-            "learned",
-            "learnedcont",
-            "rotary",
-            "ALiBi",
-            "DPB",
-            "XL",
-        ] = "none",
-        plugin_args: dict = {},
+        plugintype: Union[EncodingType, List[EncodingType]] = "none",
+        plugin_args: Union[dict, List[dict]] = {},
         only_apply_plugin_at_first: bool = False,
         dropout: float = 0.2,
         glu_ff: bool = True,
@@ -1023,22 +1033,42 @@ class Transformer(nn.Module):
         elif attentiontype == "window":
             attn_op = WindowAttention(**attention_args)
 
-        if plugintype == "none":
-            plugin = positional.Base()
-        elif plugintype == "sinusoidal":
-            plugin = positional.Sinusoidal(**plugin_args)
-        elif plugintype == "learned":
-            plugin = positional.LearnedVocab(**plugin_args)
-        elif plugintype == "learnedcont":
-            plugin = positional.LearnedContinuous(**plugin_args)
-        elif plugintype == "rotary":
-            plugin = positional.Rotary(**plugin_args)
-        elif plugintype == "ALiBi":
-            plugin = positional.ALiBi(**plugin_args)
-        elif plugintype == "DPB":
-            plugin = positional.DPB(**plugin_args)
-        elif plugintype == "XL":
-            plugin = positional.XL(**plugin_args)
+        if isinstance(plugintype, str):
+            if plugintype == "none":
+                plugin = positional.Base()
+            elif plugintype == "sinusoidal":
+                plugin = positional.Sinusoidal(**plugin_args)
+            elif plugintype == "learned":
+                plugin = positional.LearnedVocab(**plugin_args)
+            elif plugintype == "learnedcont":
+                plugin = positional.LearnedContinuous(**plugin_args)
+            elif plugintype == "rotary":
+                plugin = positional.Rotary(**plugin_args)
+            elif plugintype == "ALiBi":
+                plugin = positional.ALiBi(**plugin_args)
+            elif plugintype == "DPB":
+                plugin = positional.DPB(**plugin_args)
+            elif plugintype == "XL":
+                plugin = positional.XL(**plugin_args)
+        else:
+            plugin = []
+            for plug, plugargs in zip(plugintype, plugin_args):
+                if plug == "none":
+                    plugin.append(positional.Base())
+                elif plug == "sinusoidal":
+                    plugin.append(positional.Sinusoidal(**plugargs))
+                elif plug == "learned":
+                    plugin.append(positional.LearnedVocab(**plugargs))
+                elif plug == "learnedcont":
+                    plugin.append(positional.LearnedContinuous(**plugargs))
+                elif plug == "rotary":
+                    plugin.append(positional.Rotary(**plugargs))
+                elif plug == "ALiBi":
+                    plugin.append(positional.ALiBi(**plugargs))
+                elif plug == "DPB":
+                    plugin.append(positional.DPB(**plugargs))
+                elif plug == "XL":
+                    plugin.append(positional.XL(**plugargs))
 
         layers = []
         layers.append(
@@ -1125,9 +1155,9 @@ class TransformerEncoder(Transformer):
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
-    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+    plugintype : Union[EncodingType, List[EncodingType]], optional
         positional bias plugin, by default "none"
-    plugin_args : dict, optional
+    plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
     only_apply_plugin_at_first : bool, optional
         only apply positional bias at the first layer, by default False
@@ -1170,9 +1200,9 @@ class TransformerDecoder(Transformer):
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
-    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+    plugintype : Union[EncodingType, List[EncodingType]] = "none",, optional
         positional bias plugin, by default "none"
-    plugin_args : dict, optional
+    plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
     only_apply_plugin_at_first : bool, optional
         only apply positional bias at the first layer, by default False
@@ -1214,9 +1244,9 @@ class TransformerSeq2Seq(nn.Module):
         attention operator, by default "vanilla"
     attention_args : dict, optional
         args passed to the attention operator init, by default {}
-    plugintype : Literal["none", "sinusoidal", "learned", "learnedcont", "rotary", "ALiBi", "DPB", "XL"], optional
+    plugintype : Union[EncodingType, List[EncodingType]] = "none",, optional
         positional bias plugin, by default "none"
-    plugin_args : dict, optional
+    plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
     only_apply_plugin_at_first : bool, optional
         only apply positional bias at the first layer, by default False
@@ -1236,30 +1266,12 @@ class TransformerSeq2Seq(nn.Module):
         nh: int,
         enc_attentiontype: Literal["vanilla", "random", "window"] = "vanilla",
         enc_attention_args: dict = {},
-        enc_plugintype: Literal[
-            "none",
-            "sinusoidal",
-            "learned",
-            "learnedcont",
-            "rotary",
-            "ALiBi",
-            "DPB",
-            "XL",
-        ] = "none",
+        enc_plugintype: Union[EncodingType, List[EncodingType]] = "none",
         enc_plugin_args: dict = {},
         enc_only_apply_plugin_at_first: bool = False,
         dec_attentiontype: Literal["vanilla", "random", "window"] = "vanilla",
         dec_attention_args: dict = {},
-        dec_plugintype: Literal[
-            "none",
-            "sinusoidal",
-            "learned",
-            "learnedcont",
-            "rotary",
-            "ALiBi",
-            "DPB",
-            "XL",
-        ] = "none",
+        dec_plugintype: Union[EncodingType, List[EncodingType]] = "none",
         dec_plugin_args: dict = {},
         dec_only_apply_plugin_at_first: bool = False,
         dropout: float = 0.2,
@@ -1289,22 +1301,43 @@ class TransformerSeq2Seq(nn.Module):
         elif dec_attentiontype == "window":
             attn_op = WindowAttention(**dec_attention_args)
 
-        if dec_plugintype == "none":
-            plugin = positional.Base()
-        elif dec_plugintype == "sinusoidal":
-            plugin = positional.Sinusoidal(**dec_plugin_args)
-        elif dec_plugintype == "learned":
-            plugin = positional.LearnedVocab(**dec_plugin_args)
-        elif dec_plugintype == "learnedcont":
-            plugin = positional.LearnedContinuous(**dec_plugin_args)
-        elif dec_plugintype == "rotary":
-            plugin = positional.Rotary(**dec_plugin_args)
-        elif dec_plugintype == "ALiBi":
-            plugin = positional.ALiBi(**dec_plugin_args)
-        elif dec_plugintype == "DPB":
-            plugin = positional.DPB(**dec_plugin_args)
-        elif dec_plugintype == "XL":
-            plugin = positional.XL(**dec_plugin_args)
+
+        if isinstance(dec_plugintype, str):
+            if dec_plugintype == "none":
+                plugin = positional.Base()
+            elif dec_plugintype == "sinusoidal":
+                plugin = positional.Sinusoidal(**dec_plugin_args)
+            elif dec_plugintype == "learned":
+                plugin = positional.LearnedVocab(**dec_plugin_args)
+            elif dec_plugintype == "learnedcont":
+                plugin = positional.LearnedContinuous(**dec_plugin_args)
+            elif dec_plugintype == "rotary":
+                plugin = positional.Rotary(**dec_plugin_args)
+            elif dec_plugintype == "ALiBi":
+                plugin = positional.ALiBi(**dec_plugin_args)
+            elif dec_plugintype == "DPB":
+                plugin = positional.DPB(**dec_plugin_args)
+            elif dec_plugintype == "XL":
+                plugin = positional.XL(**dec_plugin_args)
+        else:
+            plugin = []
+            for plug, plugargs in zip(dec_plugintype, dec_plugin_args):
+                if plug == "none":
+                    plugin.append(positional.Base())
+                elif plug == "sinusoidal":
+                    plugin.append(positional.Sinusoidal(**plugargs))
+                elif plug == "learned":
+                    plugin.append(positional.LearnedVocab(**plugargs))
+                elif plug == "learnedcont":
+                    plugin.append(positional.LearnedContinuous(**plugargs))
+                elif plug == "rotary":
+                    plugin.append(positional.Rotary(**plugargs))
+                elif plug == "ALiBi":
+                    plugin.append(positional.ALiBi(**plugargs))
+                elif plug == "DPB":
+                    plugin.append(positional.DPB(**plugargs))
+                elif plug == "XL":
+                    plugin.append(positional.XL(**plugargs))
 
         layers = []
         layers.append(
