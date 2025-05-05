@@ -773,7 +773,7 @@ class TransformerLayer(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
         plugin = plugin if plugin is not None else positional.Base()
-        if not isinstance(self.plugin, list):
+        if not isinstance(plugin, list):
             self.plugin = [plugin]
         else:
             self.plugin = plugin
@@ -889,7 +889,7 @@ class CrossTransformerLayer(nn.Module):
 
         self.norm_1 = nn.LayerNorm(dim)
         plugin = plugin if plugin is not None else positional.Base()
-        if not isinstance(self.plugin, list):
+        if not isinstance(plugin, list):
             self.plugin = [plugin]
         else:
             self.plugin = plugin
