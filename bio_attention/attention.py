@@ -998,7 +998,7 @@ class Transformer(nn.Module):
         positional bias plugin, by default "none"
     plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
-    only_apply_plugin_at_first : bool, optional
+    only_apply_plugin_at_first : Union[bool, List[bool]], optional
         only apply positional bias at the first layer, by default False
     dropout : float, optional
         dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
@@ -1017,7 +1017,7 @@ class Transformer(nn.Module):
         attention_args: dict = {},
         plugintype: Union[EncodingType, List[EncodingType]] = "none",
         plugin_args: Union[dict, List[dict]] = {},
-        only_apply_plugin_at_first: bool = False,
+        only_apply_plugin_at_first: Union[bool, List[bool]] = False,
         dropout: float = 0.2,
         glu_ff: bool = True,
         activation: Literal["relu", "gelu", "swish"] = "swish",
@@ -1050,6 +1050,7 @@ class Transformer(nn.Module):
                 plugin = positional.DPB(**plugin_args)
             elif plugintype == "XL":
                 plugin = positional.XL(**plugin_args)
+            plugins_after_first = (None if only_apply_plugin_at_first else plugin)
         else:
             plugin = []
             for plug, plugargs in zip(plugintype, plugin_args):
@@ -1069,6 +1070,9 @@ class Transformer(nn.Module):
                     plugin.append(positional.DPB(**plugargs))
                 elif plug == "XL":
                     plugin.append(positional.XL(**plugargs))
+            plugins_after_first = [pl for pl, apply in zip(plugin, only_apply_plugin_at_first) if not apply]
+            if plugins_after_first == []:
+                plugins_after_first = None
 
         layers = []
         layers.append(
@@ -1082,14 +1086,14 @@ class Transformer(nn.Module):
                 activation=activation,
             )
         )
-
+        
         for _ in range(depth - 1):
             layers.append(
                 TransformerLayer(
                     attn_op,
                     dim,
                     nh,
-                    plugin=(None if only_apply_plugin_at_first else plugin),
+                    plugin=plugins_after_first,
                     dropout=dropout,
                     glu_ff=glu_ff,
                     activation=activation,
@@ -1159,7 +1163,7 @@ class TransformerEncoder(Transformer):
         positional bias plugin, by default "none"
     plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
-    only_apply_plugin_at_first : bool, optional
+    only_apply_plugin_at_first : Union[bool, List[bool]], optional
         only apply positional bias at the first layer, by default False
     dropout : float, optional
         dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
@@ -1204,7 +1208,7 @@ class TransformerDecoder(Transformer):
         positional bias plugin, by default "none"
     plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
-    only_apply_plugin_at_first : bool, optional
+    only_apply_plugin_at_first : Union[bool, List[bool]], optional
         only apply positional bias at the first layer, by default False
     dropout : float, optional
         dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
@@ -1248,7 +1252,7 @@ class TransformerSeq2Seq(nn.Module):
         positional bias plugin, by default "none"
     plugin_args : Union[dict, List[dict]], optional
         arguments passed to positional bias init, by default {}
-    only_apply_plugin_at_first : bool, optional
+    only_apply_plugin_at_first : Union[bool, List[bool]], optional
         only apply positional bias at the first layer, by default False
     dropout : float, optional
         dropout in feedforward layers. Take note that attention matrix dropout is controlled via attention_args, by default 0.2
@@ -1268,12 +1272,12 @@ class TransformerSeq2Seq(nn.Module):
         enc_attention_args: dict = {},
         enc_plugintype: Union[EncodingType, List[EncodingType]] = "none",
         enc_plugin_args: dict = {},
-        enc_only_apply_plugin_at_first: bool = False,
+        enc_only_apply_plugin_at_first: Union[bool, List[bool]] = False,
         dec_attentiontype: Literal["vanilla", "random", "window"] = "vanilla",
         dec_attention_args: dict = {},
         dec_plugintype: Union[EncodingType, List[EncodingType]] = "none",
         dec_plugin_args: dict = {},
-        dec_only_apply_plugin_at_first: bool = False,
+        dec_only_apply_plugin_at_first: Union[bool, List[bool]] = False,
         dropout: float = 0.2,
         glu_ff: bool = True,
         activation: Literal["relu", "gelu", "swish"] = "swish",
@@ -1319,6 +1323,7 @@ class TransformerSeq2Seq(nn.Module):
                 plugin = positional.DPB(**dec_plugin_args)
             elif dec_plugintype == "XL":
                 plugin = positional.XL(**dec_plugin_args)
+            plugins_after_first = (None if dec_only_apply_plugin_at_first else plugin)
         else:
             plugin = []
             for plug, plugargs in zip(dec_plugintype, dec_plugin_args):
@@ -1338,6 +1343,9 @@ class TransformerSeq2Seq(nn.Module):
                     plugin.append(positional.DPB(**plugargs))
                 elif plug == "XL":
                     plugin.append(positional.XL(**plugargs))
+            plugins_after_first = [pl for pl, apply in zip(plugin, dec_only_apply_plugin_at_first) if not apply]
+            if plugins_after_first == []:
+                plugins_after_first = None
 
         layers = []
         layers.append(
@@ -1358,7 +1366,7 @@ class TransformerSeq2Seq(nn.Module):
                     attn_op,
                     dim,
                     nh,
-                    plugin=(None if dec_only_apply_plugin_at_first else plugin),
+                    plugin=plugins_after_first,
                     dropout=dropout,
                     glu_ff=glu_ff,
                     activation=activation,
