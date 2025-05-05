@@ -343,7 +343,7 @@ class Rotary(Base):
             l_sin, l_q = sin.shape[-3], q.shape[-3]
             if l_sin != l_q:
                 sin, cos = map(
-                    lambda t: F.pad(t, (0, 0, 0, 0, l_q - l_sin, 0), (sin, cos))
+                    lambda t: F.pad(t, (0, 0, 0, 0, l_q - l_sin, 0)), (sin, cos)
                 )
 
             q = q * cos.to(q) + self.rotate_every_two(q) * sin.to(q)
@@ -357,12 +357,12 @@ class Rotary(Base):
             l_sin, l_q = sin_q.shape[-3], q.shape[-3]
             if l_sin != l_q:
                 sin_q, cos_q = map(
-                    lambda t: F.pad(t, (0, 0, 0, 0, l_q - l_sin, 0), (sin_q, cos_q))
+                    lambda t: F.pad(t, (0, 0, 0, 0, l_q - l_sin, 0)), (sin_q, cos_q)
                 )
             l_sin, l_k = sin_k.shape[-3], k.shape[-3]
             if l_sin != l_k:
                 sin_k, cos_k = map(
-                    lambda t: F.pad(t, (0, 0, 0, 0, l_k - l_sin, 0), (sin_k, cos_k))
+                    lambda t: F.pad(t, (0, 0, 0, 0, l_k - l_sin, 0)), (sin_k, cos_k)
                 )
 
             q = q * cos_q.to(q) + self.rotate_every_two(q) * sin_q.to(q)
