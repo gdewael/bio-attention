@@ -535,7 +535,7 @@ class AttnLayer(nn.Module):
         self.nh = nh
         self.to_out = nn.Linear(dim, dim)
 
-        self.plugin = plugin if plugin is not None else positional.Base()
+        self.plugin = plugin if plugin is not None else nn.ModuleList([positional.Base()])
 
     def forward(
         self,
@@ -650,7 +650,7 @@ class CrossAttnLayer(nn.Module):
         self.to_out = nn.Linear(dim, dim)
 
         assert plugin is None
-        self.plugin = plugin if plugin is not None else positional.Base()
+        self.plugin = plugin if plugin is not None else nn.ModuleList([positional.Base()])
         
 
     def forward(
@@ -773,10 +773,10 @@ class TransformerLayer(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
         plugin = plugin if plugin is not None else positional.Base()
-        if not isinstance(plugin, list):
-            self.plugin = [plugin]
+        if not isinstance(plugin, (list, nn.ModuleList)):
+            self.plugin = nn.ModuleList([plugin])
         else:
-            self.plugin = plugin
+            self.plugin = nn.ModuleList(plugin)
 
         self.attn = AttnLayer(dim, attn, nh=nh, plugin=self.plugin)
 
@@ -889,10 +889,10 @@ class CrossTransformerLayer(nn.Module):
 
         self.norm_1 = nn.LayerNorm(dim)
         plugin = plugin if plugin is not None else positional.Base()
-        if not isinstance(plugin, list):
-            self.plugin = [plugin]
+        if not isinstance(plugin, (list, nn.ModuleList)):
+            self.plugin = nn.ModuleList([plugin])
         else:
-            self.plugin = plugin
+            self.plugin = nn.ModuleList(plugin)
         
         self.self_attn = AttnLayer(dim, attn, nh=nh, plugin=self.plugin)
 
