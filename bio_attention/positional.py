@@ -372,13 +372,13 @@ class Rotary(Base):
 
     def get_rotations(self, pos):
         mthetas = (
-            self.apply_pos_division(pos).to(self.thetas)[..., None] * self.thetas
+            self.apply_pos_division(pos)[..., None] * self.thetas
         )  # B, *, h
         sin, cos = map(
             lambda t: repeat(t, "b ... h  -> b ... (h j)", j=2),
             (mthetas.sin(), mthetas.cos()),
         )
-        sin, cos = map(lambda t: t.unsqueeze(-2), (sin, cos))
+        sin, cos = map(lambda t: t.unsqueeze(-2).to(self.thetas), (sin, cos))
         return sin, cos
 
     @staticmethod
